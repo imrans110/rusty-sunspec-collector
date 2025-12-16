@@ -1,0 +1,23 @@
+[workspace]
+members = [
+    "crates/collector-app",
+    "crates/modbus-client",
+    "crates/sunspec-parser",
+    "crates/poller-actor",
+    "crates/avro-kafka",
+    "crates/discovery",
+    "crates/types",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-modbus = "0.9"
+tracing = "0.1"
+thiserror = "1.0"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }

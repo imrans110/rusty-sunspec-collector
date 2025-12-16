@@ -1,0 +1,16 @@
+[package]
+name = "collector-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+modbus-client = { path = "../modbus-client" }
+sunspec-parser = { path = "../sunspec-parser" }
+poller-actor = { path = "../poller-actor" }
+avro-kafka = { path = "../avro-kafka" }
+discovery = { path = "../discovery" }
+types = { path = "../types" }

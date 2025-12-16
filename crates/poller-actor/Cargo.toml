@@ -1,0 +1,14 @@
+[package]
+name = "poller-actor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+modbus-client = { path = "../modbus-client" }
+sunspec-parser = { path = "../sunspec-parser" }
+avro-kafka = { path = "../avro-kafka" }
+types = { path = "../types" }

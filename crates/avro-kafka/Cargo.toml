@@ -1,0 +1,11 @@
+[package]
+name = "avro-kafka"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+types = { path = "../types" }

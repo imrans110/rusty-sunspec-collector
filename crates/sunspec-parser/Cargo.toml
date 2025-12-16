@@ -1,0 +1,11 @@
+[package]
+name = "sunspec-parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+types = { path = "../types" }
