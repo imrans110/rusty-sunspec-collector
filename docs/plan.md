@@ -289,3 +289,6 @@ tokio::spawn(async {
 
 ## Change log
 - 2025-12-23: Refreshed docs site styling and index layout for GitHub Pages.
+- 2025-12-23: Adjusted docs index front matter and navigation to reduce duplication.
+- 2025-12-23: Updated docs index links to use Jekyll-relative URLs.
+- 2025-12-23: Added fallback repo links to the docs index for non-Jekyll rendering.

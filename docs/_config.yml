@@ -4,8 +4,9 @@ theme: minima
 markdown: kramdown
 sass:
   style: compressed
+include:
+  - assets
 header_pages:
-  - index.md
   - build.md
   - ops.md
   - buffer_maintenance.md
