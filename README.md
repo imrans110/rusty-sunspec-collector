@@ -1,5 +1,7 @@
 # rusty-sunspec-collector
 
+[![Rust 2021](https://img.shields.io/badge/rust-2021-1b1b1f?logo=rust)](https://www.rust-lang.org/) [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-0f766e)](LICENSE) [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3b82f6)](https://imrans110.github.io/rusty-sunspec-collector/) [![crates.io planned](https://img.shields.io/badge/crates.io-planned-6b7280)](https://crates.io/)
+
 High-concurrency, memory-safe edge service that polls Modbus TCP inverters, parses SunSpec models, and publishes serialized data to Kafka. Built as a Cargo workspace with clear domain boundaries to keep build times and dependencies under control.
 
 ![Collector architecture diagram](docs/assets/arch.svg)
@@ -98,7 +100,7 @@ To avoid long env lists, you can point to a TOML or JSON file with `SUNSPEC_CONF
 - Build/test/run workflows: `docs/build.md`
 - Runtime operations: `docs/ops.md`
 - Buffer maintenance: `docs/buffer_maintenance.md`
-- GitHub Pages entry point: `docs/index.md`
+- GitHub Pages site: `https://imrans110.github.io/rusty-sunspec-collector/`
 
 ## Cross-compilation (ARM64)
 
