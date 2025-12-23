@@ -98,6 +98,7 @@ To avoid long env lists, you can point to a TOML or JSON file with `SUNSPEC_CONF
 - Build/test/run workflows: `docs/build.md`
 - Runtime operations: `docs/ops.md`
 - Buffer maintenance: `docs/buffer_maintenance.md`
+- GitHub Pages entry point: `docs/index.md`
 
 ## Cross-compilation (ARM64)
 
