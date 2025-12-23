@@ -288,3 +288,4 @@ tokio::spawn(async {
 - [x] systemd unit template + env file.
 
 ## Change log
+- 2025-12-23: Refreshed docs site styling and index layout for GitHub Pages.

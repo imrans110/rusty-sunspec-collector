@@ -1,2 +1,12 @@
 title: Rusty SunSpec Collector Docs
+description: Deployment, operations, and development guides for the SunSpec collector.
 theme: minima
+markdown: kramdown
+sass:
+  style: compressed
+header_pages:
+  - index.md
+  - build.md
+  - ops.md
+  - buffer_maintenance.md
+  - plan.md
