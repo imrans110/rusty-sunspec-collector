@@ -1,6 +1,7 @@
 # Rusty SunSpec Collector plan
 
 ## 1. Executive summary and strategic imperative
+
 The renewable energy sector is moving toward decentralized generation and real-time telemetry. Solar PV, BESS, and smart inverters at the grid edge require reliable, low-latency data collection. A Rust-based SunSpec collector targets high-assurance, low-overhead edge compute by avoiding GC pauses, reducing memory usage, and enforcing memory safety at compile time. The design focuses on a production-grade collector that discovers SunSpec models, normalizes scale factors, buffers data durably, and forwards telemetry securely.
 
 The architecture centers on a collect-buffer-forward pipeline using Rust for reliability and performance, tokio for async execution, SQLite for durable buffering, and Kafka for high-throughput uplink. This plan is a detailed execution blueprint for engineering and operations.
@@ -8,52 +9,59 @@ The architecture centers on a collect-buffer-forward pipeline using Rust for rel
 ## 2. Architectural philosophy and design principles
 
 ### 2.1 The case for Rust at the edge
+
 Edge gateways operate with tight CPU and memory budgets. Rust's zero-cost abstractions and memory safety provide strong correctness guarantees without a garbage collector. These properties reduce the risk of runtime failures and data corruption, which are costly in remote deployments.
 
 ### 2.2 System architecture: collect-buffer-forward
 
 #### 2.2.1 Ingestion layer (SunSpec poller)
+
 - Modbus TCP connections per device.
 - SunSpec model discovery based on the sentinel and model list.
 - Async actor model so timeouts on one device do not block others.
 
 #### 2.2.2 Persistence layer (resilient buffer)
+
 - Durable, on-disk buffer to handle backhaul interruptions.
 - SQLite with WAL mode for ACID durability and operational tooling.
 
 #### 2.2.3 Uplink layer (Kafka producer)
+
 - Reads normalized data from SQLite and sends to Kafka.
 - Handles batching, compression, and backpressure.
 
 ### 2.3 Feature matrix and technology selection
 
-| Component | Selected technology | Justification | Alternatives |
-| --- | --- | --- | --- |
-| Language | Rust (2021) | Memory safety, zero-GC latency, high performance | Python, C++, Go |
-| Async runtime | Tokio | Mature ecosystem, robust async patterns | async-std, smol |
-| Modbus stack | sunspec + tokio-modbus | Type-safe model discovery and scale factors | raw tokio-modbus |
-| Local buffer | SQLite (sqlx) | ACID, file-based, strong tooling | Sled, RocksDB |
-| Messaging | Kafka (rust-rdkafka) | High throughput, decoupled producer/consumer | MQTT, HTTP |
-| Serialization | Avro | Compact binary with schema evolution | JSON, Protobuf |
-| Resilience | sd-notify (systemd) | Native watchdog integration | custom timers |
+| Component     | Selected technology    | Justification                                    | Alternatives     |
+| ------------- | ---------------------- | ------------------------------------------------ | ---------------- |
+| Language      | Rust (2021)            | Memory safety, zero-GC latency, high performance | Python, C++, Go  |
+| Async runtime | Tokio                  | Mature ecosystem, robust async patterns          | async-std, smol  |
+| Modbus stack  | sunspec + tokio-modbus | Type-safe model discovery and scale factors      | raw tokio-modbus |
+| Local buffer  | SQLite (sqlx)          | ACID, file-based, strong tooling                 | Sled, RocksDB    |
+| Messaging     | Kafka (rust-rdkafka)   | High throughput, decoupled producer/consumer     | MQTT, HTTP       |
+| Serialization | Avro                   | Compact binary with schema evolution             | JSON, Protobuf   |
+| Resilience    | sd-notify (systemd)    | Native watchdog integration                      | custom timers    |
 
 ## 3. Detailed component implementation
 
 ### 3.1 SunSpec polling engine
 
 #### 3.1.1 Device model discovery
+
 - Connect via Modbus TCP.
 - Read the SunSpec sentinel and iterate models.
 - Build a device model catalog (e.g., model 103, 160, 201).
 - Use generated Rust structs from SunSpec JSON definitions.
 
 #### 3.1.2 Scale factor normalization
+
 - Raw register values represent fixed-point data.
-- Apply scale factors: Value * 10^ScaleFactor.
+- Apply scale factors: Value \* 10^ScaleFactor.
 - Treat sentinel values (e.g., 0x8000, NaN) as None.
 - Convert into normalized domain types (e.g., `NormalizedInverterData`).
 
 #### 3.1.3 Concurrency and actor model
+
 - One ConnectionActor per device.
 - Bounded mpsc channels for messaging.
 - Failures isolated per device with supervision and restart.
@@ -61,14 +69,17 @@ Edge gateways operate with tight CPU and memory budgets. Rust's zero-cost abstra
 ### 3.2 Persistence subsystem: SQLite vs. Sled
 
 #### 3.2.1 Technology evaluation
+
 - SQLite provides ACID durability and inspection tooling.
 - Sled offers higher raw throughput but less operational tooling.
 
 #### 3.2.2 Implementation strategy
+
 - Use sqlx for SQLite with compile-time query checking.
 - WAL mode and `synchronous=NORMAL` for performance on flash media.
 
 Schema:
+
 ```sql
 CREATE TABLE IF NOT EXISTS telemetry_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,11 +92,13 @@ CREATE TABLE IF NOT EXISTS telemetry_queue (
 ### 3.3 Uplink subsystem: Kafka and Avro
 
 #### 3.3.1 Kafka producer configuration
+
 - Compression: zstd.
 - Micro-batching with short buffering windows.
 - Backpressure handling to stop draining SQLite when queue is full.
 
 #### 3.3.2 Serialization with Apache Avro
+
 - Schema-first format with evolution support.
 - Use `serde` + `apache-avro` derive.
 - Ensure Option maps to Avro unions.
@@ -95,12 +108,15 @@ CREATE TABLE IF NOT EXISTS telemetry_queue (
 ### 4.1 Phase 1: environment setup and cross-compilation
 
 #### 4.1.1 The cross-compilation challenge
+
 Cross-compiling with C dependencies (librdkafka, libsqlite3) requires a target sysroot. Direct `cargo build --target aarch64-unknown-linux-gnu` is insufficient without target libs.
 
 #### 4.1.2 Dockerized solution
+
 Use `cross` with a custom Docker image.
 
 Dockerfile (`docker/Dockerfile.arm64`):
+
 ```dockerfile
 FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu:latest
 
@@ -117,6 +133,7 @@ ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
 ```
 
 Cross config (`Cross.toml`):
+
 ```toml
 [target.aarch64-unknown-linux-gnu]
 image = "my-sunspec-builder"
@@ -125,6 +142,7 @@ image = "my-sunspec-builder"
 ### 4.2 Phase 2: core application logic
 
 #### 4.2.1 Project structure
+
 - `src/models/`: generated SunSpec structs.
 - `src/poller/`: Modbus logic and actors.
 - `src/buffer/`: SQLite buffer.
@@ -132,6 +150,7 @@ image = "my-sunspec-builder"
 - `src/main.rs`: orchestrator.
 
 #### 4.2.2 Main event loop
+
 ```rust
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -151,32 +170,38 @@ async fn main() -> Result<()> {
 ```
 
 ### 4.3 Phase 3: resilience and observability
+
 - systemd watchdog integration (`READY=1`, `WATCHDOG=1`).
 - structured logs via `tracing`.
 - optional OpenTelemetry metrics.
 
 ### 4.4 Phase 4: testing and validation
+
 - Use a Modbus simulator for CI (e.g., pymodbus-sim).
 - Integration tests validate discovery and scale-factor math.
 - Benchmarks with `criterion` for serialization and memory use.
 
 ## 5. Security considerations
+
 - Rust prevents buffer overflows and data races.
 - Kafka communication uses TLS (`security.protocol=SSL`).
 - Prefer encrypted storage (LUKS) on edge devices.
 
 ## 6. Execution roadmap
+
 - Foundation (Weeks 1-2): Cross-compilation setup, dependency selection, basic Modbus actor.
 - Core logic (Weeks 3-4): SunSpec discovery, scale-factor normalization, unit tests.
 - Persistence and uplink (Weeks 5-6): SQLite buffer, Kafka producer, Avro serialization.
 - Hardening (Weeks 7-8): Watchdog, structured logging, load testing, deployment artifacts.
 
 ## 7. Conclusion
+
 A Rust-based SunSpec collector provides a reliable, high-performance edge data pipeline. The architecture and execution plan emphasize resilience, operational safety, and data correctness for modern grid analytics.
 
 ## 8. Detailed technical implementation specification
 
 ### 8.1 Dependency management and crate selection
+
 - `tokio` with `full` + `macros`.
 - `sunspec` with `tokio` + `serde`.
 - `tokio-modbus` compatible with `sunspec`.
@@ -185,10 +210,12 @@ A Rust-based SunSpec collector provides a reliable, high-performance edge data p
 - `apache-avro` with `derive`.
 
 ### 8.2 Error handling
+
 - `thiserror` for library errors.
 - `anyhow` for top-level context.
 
 ### 8.3 Poller actor state machine
+
 States: Disconnected -> Connected -> Discovering -> Polling -> Backoff.
 
 ```rust
@@ -212,6 +239,7 @@ impl DeviceActor {
 ```
 
 ### 8.4 Buffer schema and operations
+
 ```sql
 CREATE TABLE IF NOT EXISTS telemetry_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -224,11 +252,13 @@ CREATE INDEX IF NOT EXISTS idx_created_at ON telemetry_queue(created_at);
 ```
 
 Operational logic:
+
 - Insert on poll.
 - Drain ordered by id.
 - Delete on successful Kafka send.
 
 ### 8.5 Uplink configuration
+
 - `message.timeout.ms=5000`.
 - `queue.buffering.max.messages=10000`.
 - `compression.codec=zstd`.
@@ -236,12 +266,15 @@ Operational logic:
 - Pause drains on `QueueFull` errors.
 
 ### 8.6 Cross-compilation workflow
+
 - Build custom cross image.
 - Configure `Cross.toml`.
 - Build with `cross build --release --target aarch64-unknown-linux-gnu`.
 
 ### 8.7 Resilience engineering
+
 Systemd service (`/etc/systemd/system/sunspec-collector.service`):
+
 ```ini
 [Unit]
 Description=Rust SunSpec Collector
@@ -260,6 +293,7 @@ WantedBy=multi-user.target
 ```
 
 Watchdog task:
+
 ```rust
 tokio::spawn(async {
     loop {
@@ -270,6 +304,7 @@ tokio::spawn(async {
 ```
 
 ## Implementation tracker
+
 - [x] Modbus client connect/read with timeout, retry/backoff, batching, inter-read delay.
 - [x] Modbus integration test against `diagslave`.
 - [x] Poller actor loop reads model ranges and publishes payloads.
@@ -287,8 +322,24 @@ tokio::spawn(async {
 - [x] systemd READY/WATCHDOG integration.
 - [x] systemd unit template + env file.
 
-## Change log
-- 2025-12-23: Refreshed docs site styling and index layout for GitHub Pages.
-- 2025-12-23: Adjusted docs index front matter and navigation to reduce duplication.
-- 2025-12-23: Updated docs index links to use Jekyll-relative URLs.
-- 2025-12-23: Added fallback repo links to the docs index for non-Jekyll rendering.
+## Backlog (future scope)
+
+- [ ] Normalize SunSpec readings into domain-specific structs (apply scale factors and sentinel rules at the edge).
+- [ ] Add repeating group support for SunSpec parser (storage/BESS modules).
+- [ ] Add per-device polling profiles (model filters, interval overrides, device-specific quirks).
+- [ ] Add backpressure from buffer depth to pollers (pause polling when buffer exceeds threshold).
+- [ ] Add Kafka TLS/SASL configuration + secret loading strategy.
+- [ ] Add Schema Registry integration + schema evolution policy docs.
+- [ ] Add Prometheus metrics exporter (poll latency, queue depth, uplink throughput).
+- [ ] Add config reload support (SIGHUP) with validation + safe rollback.
+- [ ] Add buffer retention policy (size/age-based pruning) + scheduled maintenance job.
+- [ ] Add buffer compaction and integrity checks for flash endurance.
+- [ ] Add certificate rotation workflow for Kafka TLS credentials.
+- [ ] Add structured error taxonomy + error-to-metric mapping.
+- [ ] Add data quality flags (stale, partial, invalid, retries) in uplink payloads.
+- [ ] Add device health checks (connectivity, last-successful poll, model drift).
+- [ ] Add simulator-driven integration suite for multiple device models.
+- [ ] Add packaging pipeline (deb/rpm/container) with upgrade-safe config paths.
+- [ ] Add audit log for config changes and runtime control events.
+- [ ] Add support for multiple Kafka topics per device/model.
+- [ ] Evaluate adopting upstream `sunspec` crate for model types/codegen, or document why the in-tree parser remains preferred.

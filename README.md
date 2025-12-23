@@ -39,6 +39,7 @@ High-concurrency, memory-safe edge service that polls Modbus TCP inverters, pars
 - Hardening: watchdog, ops docs, and deployment artifacts.
 
 See `docs/plan.md` for the current execution tracker.
+See `docs/plan.md` for the future-scope backlog items.
 
 ## Getting started
 
