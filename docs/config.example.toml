@@ -1,0 +1,40 @@
+[discovery]
+subnet = "192.168.1.0/24"
+port = 502
+max_concurrency = 64
+per_host_timeout_ms = 200
+
+[[discovery.static_devices]]
+ip = "192.168.1.20"
+unit_id = 1
+
+[poller]
+poll_interval_ms = 1000
+request_timeout_ms = 1000
+jitter_ms = 0
+
+[modbus]
+max_batch_size = 64
+timeout_ms = 1000
+retry_count = 2
+retry_backoff_ms = 100
+retry_max_backoff_ms = 2000
+inter_read_delay_ms = 5
+
+[sunspec]
+base_address = 40000
+discovery_register_count = 200
+
+[buffer]
+path = "sunspec-buffer.sqlite"
+batch_size = 100
+drain_interval_ms = 500
+
+[kafka]
+brokers = "localhost:9092"
+topic = "sunspec.telemetry"
+client_id = "sunspec-collector"
+acks = "all"
+compression = "zstd"
+timeout_ms = 5000
+enable_idempotence = true

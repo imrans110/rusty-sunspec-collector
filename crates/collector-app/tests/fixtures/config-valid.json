@@ -1,0 +1,40 @@
+{
+  "discovery": {
+    "subnet": "192.168.10.0/24",
+    "port": 1502,
+    "max_concurrency": 16,
+    "per_host_timeout_ms": 100
+  },
+  "poller": {
+    "poll_interval_ms": 500,
+    "request_timeout_ms": 800,
+    "jitter_ms": 5
+  },
+  "modbus": {
+    "port": 1502,
+    "max_batch_size": 32,
+    "timeout_ms": 750,
+    "retry_count": 1,
+    "retry_backoff_ms": 50,
+    "retry_max_backoff_ms": 500,
+    "inter_read_delay_ms": 10
+  },
+  "sunspec": {
+    "base_address": 40000,
+    "discovery_register_count": 150
+  },
+  "buffer": {
+    "path": "buffer.json.sqlite",
+    "batch_size": 50,
+    "drain_interval_ms": 250
+  },
+  "kafka": {
+    "brokers": "localhost:9092",
+    "topic": "sunspec.telemetry",
+    "client_id": "sunspec-collector-json",
+    "acks": "all",
+    "compression": "zstd",
+    "timeout_ms": 4000,
+    "enable_idempotence": false
+  }
+}

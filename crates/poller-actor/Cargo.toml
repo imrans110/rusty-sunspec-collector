@@ -7,8 +7,8 @@ edition = "2021"
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
 
 modbus-client = { path = "../modbus-client" }
 sunspec-parser = { path = "../sunspec-parser" }
-avro-kafka = { path = "../avro-kafka" }
 types = { path = "../types" }

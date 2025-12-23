@@ -6,6 +6,7 @@ members = [
     "crates/poller-actor",
     "crates/avro-kafka",
     "crates/discovery",
+    "crates/buffer",
     "crates/types",
 ]
 resolver = "2"

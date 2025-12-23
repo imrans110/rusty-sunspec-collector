@@ -7,5 +7,7 @@ edition = "2021"
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+apache-avro = { version = "0.16", features = ["derive"] }
+rdkafka = { version = "0.36", features = ["cmake-build", "ssl", "tokio"] }
 
 types = { path = "../types" }

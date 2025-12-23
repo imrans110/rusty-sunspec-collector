@@ -1,0 +1,15 @@
+[Unit]
+Description=Rusty SunSpec Collector
+After=network.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/collector-app
+Restart=always
+RestartSec=5
+WatchdogSec=10
+LimitNOFILE=4096
+EnvironmentFile=-/etc/sunspec-collector.env
+
+[Install]
+WantedBy=multi-user.target

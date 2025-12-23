@@ -1,0 +1,29 @@
+[discovery]
+subnet = "not-a-cidr"
+port = 0
+max_concurrency = 0
+per_host_timeout_ms = 0
+
+[poller]
+poll_interval_ms = 0
+request_timeout_ms = 0
+
+[modbus]
+port = 0
+timeout_ms = 0
+retry_backoff_ms = 0
+retry_max_backoff_ms = 0
+inter_read_delay_ms = 0
+
+[sunspec]
+base_address = 0
+discovery_register_count = 0
+
+[buffer]
+batch_size = 0
+drain_interval_ms = 0
+
+[kafka]
+brokers = ""
+topic = "bad topic"
+timeout_ms = 0
