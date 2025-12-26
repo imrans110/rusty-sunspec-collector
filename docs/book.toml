@@ -1,0 +1,26 @@
+[book]
+authors = ["Imran S."]
+language = "en"
+multilingual = false
+src = "."
+title = "Rusty SunSpec Collector"
+
+[output.html]
+git-repository-url = "https://github.com/imrans110/rusty-sunspec-collector"
+site-url = "/rusty-sunspec-collector/"
+theme = "ayu"
+
+[output.html.search]
+enable = true
+limit_results = 30
+teaser_word_count = 30
+use_boolean_and = true
+boost_title = 2
+boost_hierarchy = 1
+boost_paragraph = 1
+expand = true
+heading_split = false
+
+[output.html.fold]
+enable = true
+level = 0
