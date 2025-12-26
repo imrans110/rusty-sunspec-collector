@@ -1,7 +1,7 @@
 [book]
 authors = ["Imran S."]
 language = "en"
-multilingual = false
+
 src = "."
 title = "Rusty SunSpec Collector"
 
