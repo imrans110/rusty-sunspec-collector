@@ -39,6 +39,7 @@ pub struct CollectorConfig {
     pub kafka_timeout_ms: Option<u64>,
     pub kafka_topic: Option<String>,
     pub kafka_enable_idempotence: Option<bool>,
+    pub metrics_port: u16,
 }
 
 impl CollectorConfig {
@@ -140,6 +141,7 @@ impl Default for CollectorConfig {
             poller: ActorConfig::default(),
             base_address: DEFAULT_BASE_ADDRESS,
             discovery_register_count: DEFAULT_DISCOVERY_REG_COUNT,
+            discovery_unit_ids: vec![1],
             channel_capacity: DEFAULT_CHANNEL_CAPACITY,
             respawn_delay_ms: DEFAULT_RESPAWN_DELAY_MS,
             buffer_path: DEFAULT_BUFFER_PATH.to_string(),
@@ -152,6 +154,9 @@ impl Default for CollectorConfig {
             kafka_timeout_ms: None,
             kafka_topic: None,
             kafka_enable_idempotence: None,
+            kafka_topic: None,
+            kafka_enable_idempotence: None,
+            metrics_port: 9090,
         }
     }
 }
@@ -159,6 +164,11 @@ impl Default for CollectorConfig {
 fn apply_env_overrides(config: &mut CollectorConfig) {
     if let Ok(value) = env::var("SUNSPEC_SUBNET") {
         config.discovery.subnet = value;
+    }
+
+    if let Some(ids) = env::var("SUNSPEC_DISCOVERY_UNIT_IDS").ok() {
+        config.discovery_unit_ids = parse_unit_id_list(&ids);
+        config.discovery.unit_ids = config.discovery_unit_ids.clone();
     }
 
     if let Some(port) = parse_env_u16("SUNSPEC_PORT") {
@@ -223,6 +233,10 @@ fn apply_env_overrides(config: &mut CollectorConfig) {
         env::var("SUNSPEC_KAFKA_TOPIC").ok().or(config.kafka_topic);
     config.kafka_enable_idempotence =
         parse_env_bool("SUNSPEC_KAFKA_IDEMPOTENCE").or(config.kafka_enable_idempotence);
+
+    if let Some(port) = parse_env_u16("SUNSPEC_METRICS_PORT") {
+        config.metrics_port = port;
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -317,6 +331,10 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) {
     if let Some(discovery) = file.discovery {
         if let Some(subnet) = discovery.subnet {
             config.discovery.subnet = subnet;
+        }
+        if let Some(ids) = discovery.unit_ids {
+            config.discovery_unit_ids = ids.clone();
+            config.discovery.unit_ids = ids;
         }
         if let Some(port) = discovery.port {
             config.discovery.port = port;

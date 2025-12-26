@@ -130,7 +130,7 @@ pub fn parse_models_from_xml(data: &str) -> Result<Vec<ModelDefinition>, ParserE
                 let mut length = None;
 
                 for attr in event.attributes() {
-                    let attr = attr?;
+                    let attr = attr.map_err(|e| ParserError::InvalidAttribute(e.to_string()))?;
                     let key = attr.key.as_ref();
                     let value = attr.unescape_value()?.into_owned();
 
@@ -287,7 +287,6 @@ pub fn parse_models_from_registers_lenient(
     }
 
     Ok(models)
-}
 }
 
 /// SunSpec marks absent values with sentinel patterns (e.g., 0x8000 for i16). Returns None when the raw value is a sentinel.

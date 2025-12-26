@@ -8,7 +8,8 @@ use tokio::time::sleep;
 use tracing::{info, warn};
 
 use modbus_client::{ClientConfig, ClientError, ModbusClient};
-use serde::Serialize;
+use metrics::counter;
+use serde::{Deserialize, Serialize};
 use sunspec_parser::ModelDefinition;
 use types::DeviceIdentity;
 
@@ -33,39 +34,20 @@ impl Default for ActorConfig {
 pub enum PollerError {
     #[error("failed to connect to modbus device: {0}")]
     Connect(#[from] modbus_client::ClientError),
+    #[error("too many consecutive errors ({0})")]
+    TooManyErrors(u32),
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PollSample {
-    device: DeviceIdentity,
-    model_id: u16,
-    model_name: String,
-    start: u16,
-    registers: Vec<u16>,
-    collected_at_ms: u64,
+    pub device: DeviceIdentity,
+    pub model_id: u16,
+    pub model_name: String,
+    pub start: u16,
+    pub registers: Vec<u16>,
+    pub collected_at_ms: u64,
 }
 
-impl PollSample {
-    pub fn new(
-        device: DeviceIdentity,
-        model_id: u16,
-        model_name: impl Into<String>,
-        start: u16,
-        registers: Vec<u16>,
-        collected_at_ms: u64,
-    ) -> Self {
-        Self {
-            device,
-            model_id,
-            model_name: model_name.into(),
-            start,
-            registers,
-            collected_at_ms,
-        }
-    }
-}
-
-/// A lightweight polling task responsible for one device.
 pub struct PollerActor {
     identity: DeviceIdentity,
     modbus_config: ClientConfig,
@@ -74,6 +56,8 @@ pub struct PollerActor {
     shutdown: watch::Receiver<bool>,
     config: ActorConfig,
 }
+
+const MAX_CONSECUTIVE_ERRORS: u32 = 10;
 
 impl PollerActor {
     pub fn new(
@@ -99,6 +83,7 @@ impl PollerActor {
         modbus_config.timeout_ms = self.config.request_timeout.as_millis() as u64;
         let client = ModbusClient::connect(modbus_config).await?;
         let mut iteration = 0u64;
+        let mut consecutive_errors = 0u32;
 
         loop {
             if *self.shutdown.borrow() {
@@ -108,6 +93,7 @@ impl PollerActor {
 
             let cycle_start = Instant::now();
             let mut timeout_count = 0u64;
+            let mut cycle_had_error = false;
 
             for model in &self.models {
                 if model.length == 0 {
@@ -119,6 +105,12 @@ impl PollerActor {
                     .await
                 {
                     Ok(registers) => {
+                        // Reset error counter on successful read (at least partial success keeps us alive)
+                        if consecutive_errors > 0 {
+                             info!(ip = %self.identity.ip, "connection recovered");
+                             consecutive_errors = 0;
+                        }
+
                         let sample = PollSample {
                             device: self.identity.clone(),
                             model_id: model.id,
@@ -129,16 +121,20 @@ impl PollerActor {
                         };
 
                         if let Err(err) = self.sender.send(sample).await {
-                            warn!(
+                             warn!(
                                 ip = %self.identity.ip,
                                 unit_id = self.identity.unit_id,
                                 model_id = model.id,
                                 error = %err,
                                 "telemetry channel send failed"
                             );
+                            counter!("poller_error", "ip" => self.identity.ip.clone(), "type" => "channel").increment(1);
+                        } else {
+                            counter!("poller_success", "ip" => self.identity.ip.clone()).increment(1);
                         }
                     }
                     Err(err) => {
+                        cycle_had_error = true;
                         if matches!(err, ClientError::Timeout { .. }) {
                             timeout_count += 1;
                         }
@@ -149,7 +145,16 @@ impl PollerActor {
                             error = %err,
                             "modbus read failed"
                         );
+                        counter!("poller_error", "ip" => self.identity.ip.clone(), "type" => "modbus").increment(1);
                     }
+                }
+            }
+
+            if cycle_had_error {
+                consecutive_errors += 1;
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    warn!(ip = %self.identity.ip, errors = consecutive_errors, "max errors exceeded, exiting");
+                    return Err(PollerError::TooManyErrors(consecutive_errors));
                 }
             }
 
@@ -163,6 +168,7 @@ impl PollerActor {
                 elapsed_ms = elapsed.as_millis(),
                 lag_ms = lag.as_millis(),
                 timeout_count,
+                consecutive_errors,
                 delay_ms = delay.as_millis(),
                 "poll cycle complete"
             );

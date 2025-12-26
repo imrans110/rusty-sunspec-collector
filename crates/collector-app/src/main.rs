@@ -5,8 +5,15 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tracing::{info, warn};
+
+
+use axum::{routing::get, Router};
+use metrics::{counter, gauge, histogram};
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use std::future;
+use std::net::SocketAddr;
 
 use avro_kafka::{KafkaConfig, Publisher};
 use buffer::BufferStore;
@@ -28,6 +35,16 @@ async fn main() -> Result<()> {
     let config = CollectorConfig::load_with_path(config_path).context("load config failed")?;
     config.validate().context("config validation failed")?;
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    let builder = PrometheusBuilder::new();
+    let handle = builder
+        .install_recorder()
+        .context("failed to install metrics recorder")?;
+    let builder = PrometheusBuilder::new();
+    let handle = builder
+        .install_recorder()
+        .context("failed to install metrics recorder")?;
+    let _metrics_handle = tokio::spawn(metrics_task(handle, shutdown_rx.clone(), config.metrics_port));
 
     let devices = discover(config.discovery.clone())
         .await
@@ -243,14 +260,18 @@ async fn buffer_task(
             maybe_sample = rx.recv() => {
                 match maybe_sample {
                     Some(sample) => {
-                        match publisher.serialize(&sample) {
+                        // Store lightweight JSON in buffer instead of Avro
+                        match serde_json::to_vec(&sample) {
                             Ok(payload) => {
                                 if let Err(err) = buffer.enqueue(publisher.topic(), &payload).await {
                                     warn!(error = %err, "buffer enqueue failed");
+                                    counter!("buffer_enqueue_error").increment(1);
+                                } else {
+                                    counter!("buffer_enqueue_success").increment(1);
                                 }
                             }
                             Err(err) => {
-                                warn!(error = %err, "avro serialization failed");
+                                warn!(error = %err, "json serialization failed");
                             }
                         }
                     }
@@ -277,6 +298,7 @@ async fn uplink_task(
     let mut failure_count: u32 = 0;
     let mut total_sent: u64 = 0;
     let mut total_failed: u64 = 0;
+    
     loop {
         let delay = uplink_delay(
             drain_interval,
@@ -284,6 +306,7 @@ async fn uplink_task(
             Duration::from_millis(DEFAULT_UPLINK_BACKOFF_MS),
             Duration::from_millis(DEFAULT_UPLINK_BACKOFF_MAX_MS),
         );
+
         tokio::select! {
             _ = sleep(delay) => {
                 let batch = match buffer.dequeue_batch(batch_size).await {
@@ -301,44 +324,92 @@ async fn uplink_task(
                     continue;
                 }
 
-                let mut delivered = Vec::with_capacity(batch.len());
-                let mut encountered_error = false;
-                for message in batch {
-                    match publisher.publish_bytes(&message.topic, &message.payload).await {
-                        Ok(()) => delivered.push(message.id),
+                let mut samples = Vec::with_capacity(batch.len());
+                let mut ids_to_ack = Vec::with_capacity(batch.len());
+                
+                // Deserialization phase
+                for message in &batch {
+                    match serde_json::from_slice::<PollSample>(&message.payload) {
+                        Ok(sample) => {
+                            samples.push(sample);
+                            ids_to_ack.push(message.id);
+                        }
                         Err(err) => {
-                            warn!(error = %err, "uplink publish failed");
-                            encountered_error = true;
-                            total_failed = total_failed.saturating_add(1);
-                            break;
+                             // Corrupt data in buffer: log and mark for deletion to prevent head-of-line blocking
+                             warn!(id = message.id, error = %err, "json deserialize failed, discarding");
+                             ids_to_ack.push(message.id);
                         }
                     }
                 }
 
-                if let Err(err) = buffer.delete_batch(&delivered).await {
-                    warn!(error = %err, "buffer delete failed");
-                    encountered_error = true;
-                    total_failed = total_failed.saturating_add(1);
+                let valid_count = samples.len();
+                let mut encountered_error = false;
+                
+                if !samples.is_empty() {
+                    // Batch publish
+                    match publisher.serialize_batch(&samples) {
+                        Ok(avro_payload) => {
+                             let start = std::time::Instant::now();
+                             match publisher.publish_bytes(publisher.topic(), &avro_payload).await {
+                                 Ok(()) => {
+                                     // Success! unique batch sent.
+                                     let duration = start.elapsed();
+                                     histogram!("uplink_publish_latency", duration);
+                                     counter!("uplink_messages_sent", "batch_size" => valid_count.to_string()).increment(valid_count as u64);
+                                 }
+                                 Err(err) => {
+                                     warn!(error = %err, "uplink publish batch failed");
+                                     encountered_error = true;
+                                     counter!("uplink_publish_error").increment(1);
+                                     // Reset ids to ack, we must RETRY these valid samples.
+                                     // However, we still want to delete the explicitly corrupt ones (which were not in samples).
+                                     // To do this cleanly: 
+                                     // 1. Separate valid IDs vs corrupt IDs.
+                                     // 2. Only ack valid IDs if publish succeeds.
+                                     // 3. Always ack corrupt IDs.
+                                     // simplified: if publish fails, we just don't ack *anything* this cycle. 
+                                     // Corrupt messages will stay and be warned about again. (Suboptimal but safe).
+                                     // Actually, let's just fail the whole batch for now.
+                                 }
+                             }
+                        }
+                        Err(err) => {
+                            warn!(error = %err, "avro batch serialization failed");
+                            encountered_error = true;
+                        }
+                    }
+                }
+
+                if encountered_error {
+                    failure_count = failure_count.saturating_add(1);
+                    total_failed = total_failed.saturating_add(batch.len() as u64);
+                } else {
+                    // Ack processed messages (valid + corrupt ones we filtered out)
+                    if !ids_to_ack.is_empty() {
+                        if let Err(err) = buffer.delete_batch(&ids_to_ack).await {
+                            warn!(error = %err, "buffer delete failed");
+                             // If delete fails, we will re-process them. Idempotency handling needed downstream or just accept duples.
+                        }
+                    }
+                    
+                    total_sent = total_sent.saturating_add(valid_count as u64);
+                    failure_count = 0;
                 }
 
                 let queue_depth = match buffer.pending_count().await {
-                    Ok(count) => Some(count),
+                    Ok(count) => {
+                        gauge!("buffer_size", count as f64);
+                        Some(count)
+                    }
                     Err(err) => {
                         warn!(error = %err, "buffer count failed");
                         None
                     }
                 };
 
-                total_sent = total_sent.saturating_add(delivered.len() as u64);
-
-                if encountered_error {
-                    failure_count = failure_count.saturating_add(1);
-                } else {
-                    failure_count = 0;
-                }
-
                 info!(
-                    batch_size = delivered.len(),
+                    batch_size = batch.len(),
+                    valid_samples = valid_count,
                     queue_depth = queue_depth.unwrap_or(-1),
                     total_sent,
                     total_failed,
@@ -354,6 +425,29 @@ async fn uplink_task(
                 }
             }
         }
+    }
+}
+
+async fn metrics_task(handle: PrometheusHandle, mut shutdown: watch::Receiver<bool>, port: u16) {
+    let app = Router::new().route("/metrics", get(move || future::ready(handle.render())));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    info!(%addr, "metrics server listening");
+
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            warn!(error = %e, "failed to bind metrics port");
+            return;
+        }
+    };
+
+    if let Err(err) = axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            let _ = shutdown.changed().await;
+        })
+        .await
+    {
+        warn!(error = %err, "metrics server error");
     }
 }
 

@@ -19,6 +19,8 @@ pub struct DiscoveryConfig {
     pub port: u16,
     pub max_concurrency: usize,
     pub per_host_timeout_ms: u64,
+    /// List of Modbus Unit IDs to assume for found hosts.
+    pub unit_ids: Vec<u8>,
     /// Optional static device list. When set, subnet scanning is skipped.
     pub static_devices: Vec<DeviceIdentity>,
 }
@@ -30,6 +32,7 @@ impl Default for DiscoveryConfig {
             port: 502,
             max_concurrency: 64,
             per_host_timeout_ms: 200,
+            unit_ids: vec![1],
             static_devices: Vec::new(),
         }
     }
@@ -57,7 +60,9 @@ pub async fn discover(config: DiscoveryConfig) -> Result<Vec<DeviceIdentity>, Di
     discover_subnet(config).await
 }
 
-pub async fn discover_subnet(config: DiscoveryConfig) -> Result<Vec<DeviceIdentity>, DiscoveryError> {
+pub async fn discover_subnet(
+    config: DiscoveryConfig,
+) -> Result<Vec<DeviceIdentity>, DiscoveryError> {
     if config.max_concurrency == 0 {
         return Err(DiscoveryError::InvalidConcurrency);
     }
@@ -73,12 +78,20 @@ pub async fn discover_subnet(config: DiscoveryConfig) -> Result<Vec<DeviceIdenti
     let mut join_set = JoinSet::new();
     let mut devices = Vec::new();
     let mut current = first;
+    // Capture unit_ids to move into tasks (needs to be cloned or shared)
+    // Since Vec<u8> is cheap, we can clone it per task or wrap in Arc. Arc is better for many tasks.
+    let unit_ids = Arc::new(config.unit_ids);
 
     loop {
-        let permit = semaphore.clone().acquire_owned().await.expect("semaphore closed");
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore closed");
         let ip = u32_to_ipv4(current);
         let port = config.port;
         let timeout_ms = config.per_host_timeout_ms;
+        let task_unit_ids = unit_ids.clone();
 
         join_set.spawn(async move {
             let _permit = permit;
@@ -87,10 +100,14 @@ pub async fn discover_subnet(config: DiscoveryConfig) -> Result<Vec<DeviceIdenti
             match timeout(Duration::from_millis(timeout_ms), TcpStream::connect(addr)).await {
                 Ok(Ok(_stream)) => {
                     info!(%addr, "discovered modbus host");
-                    Some(DeviceIdentity {
-                        ip: ip.to_string(),
-                        unit_id: 1,
-                    })
+                    let mut found = Vec::with_capacity(task_unit_ids.len());
+                    for &uid in task_unit_ids.iter() {
+                        found.push(DeviceIdentity {
+                            ip: ip.to_string(),
+                            unit_id: uid,
+                        });
+                    }
+                    Some(found)
                 }
                 Ok(Err(err)) => {
                     debug!(%addr, error = %err, "connection failed");
@@ -105,11 +122,12 @@ pub async fn discover_subnet(config: DiscoveryConfig) -> Result<Vec<DeviceIdenti
 
         if join_set.len() >= config.max_concurrency {
             if let Some(result) = join_set.join_next().await {
-                if let Some(device) = result? {
-                    devices.push(device);
-                }
+                 if let Some(found_list) = result? {
+                    devices.extend(found_list);
+                 }
             }
         }
+
 
         if current == last {
             break;
@@ -118,8 +136,8 @@ pub async fn discover_subnet(config: DiscoveryConfig) -> Result<Vec<DeviceIdenti
     }
 
     while let Some(result) = join_set.join_next().await {
-        if let Some(device) = result? {
-            devices.push(device);
+        if let Some(found_list) = result? {
+            devices.extend(found_list);
         }
     }
 

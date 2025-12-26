@@ -51,7 +51,11 @@ impl Publisher {
             .set("compression.type", &config.compression)
             .set(
                 "enable.idempotence",
-                if config.enable_idempotence { "true" } else { "false" },
+                if config.enable_idempotence {
+                    "true"
+                } else {
+                    "false"
+                },
             )
             .set("message.timeout.ms", &config.message_timeout_ms.to_string())
             .create()
@@ -66,7 +70,7 @@ impl Publisher {
     }
 
     pub async fn publish<T: Serialize>(&self, value: &T) -> Result<(), PublishError> {
-        let payload = self.serialize(value)?;
+        let payload = self.serialize_batch(std::slice::from_ref(value))?;
         self.publish_bytes(&self.topic, &payload).await
     }
 
@@ -87,13 +91,15 @@ impl Publisher {
         }
     }
 
-    pub fn serialize<T: Serialize>(&self, value: &T) -> Result<Vec<u8>, PublishError> {
-        let avro_value = apache_avro::to_value(value)
-            .map_err(|err| PublishError::Encode(err.to_string()))?;
+    pub fn serialize_batch<T: Serialize>(&self, values: &[T]) -> Result<Vec<u8>, PublishError> {
         let mut writer = Writer::with_codec(&self.schema, Vec::new(), apache_avro::Codec::Deflate);
-        writer
-            .append(avro_value)
-            .map_err(|err| PublishError::Encode(err.to_string()))?;
+        for value in values {
+            let avro_value =
+                apache_avro::to_value(value).map_err(|err| PublishError::Encode(err.to_string()))?;
+            writer
+                .append(avro_value)
+                .map_err(|err| PublishError::Encode(err.to_string()))?;
+        }
         writer
             .flush()
             .map_err(|err| PublishError::Encode(err.to_string()))?;

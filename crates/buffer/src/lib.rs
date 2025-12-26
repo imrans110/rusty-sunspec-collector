@@ -65,11 +65,9 @@ impl BufferStore {
         )
         .execute(&pool)
         .await?;
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_created_at ON telemetry_queue(created_at)",
-        )
-        .execute(&pool)
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_created_at ON telemetry_queue(created_at)")
+            .execute(&pool)
+            .await?;
 
         info!(path = %path, "buffer initialized");
 
@@ -77,25 +75,22 @@ impl BufferStore {
     }
 
     pub async fn enqueue(&self, topic: &str, payload: &[u8]) -> Result<(), BufferError> {
-        sqlx::query(
-            "INSERT INTO telemetry_queue (topic, payload, created_at) VALUES (?, ?, ?)",
-        )
-        .bind(topic)
-        .bind(payload)
-        .bind(unix_ms())
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("INSERT INTO telemetry_queue (topic, payload, created_at) VALUES (?, ?, ?)")
+            .bind(topic)
+            .bind(payload)
+            .bind(unix_ms())
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }
 
     pub async fn dequeue_batch(&self, limit: i64) -> Result<Vec<BufferedMessage>, BufferError> {
-        let rows = sqlx::query(
-            "SELECT id, topic, payload FROM telemetry_queue ORDER BY id ASC LIMIT ?",
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
+        let rows =
+            sqlx::query("SELECT id, topic, payload FROM telemetry_queue ORDER BY id ASC LIMIT ?")
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?;
 
         let messages = rows
             .into_iter()

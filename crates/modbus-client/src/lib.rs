@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
 use tokio_modbus::client::tcp;
 use tokio_modbus::client::Context;
-use tokio_modbus::prelude::{Reader, Slave};
+use tokio_modbus::prelude::{Reader, Slave, SlaveContext};
 use tracing::{debug, warn};
 
 /// Configuration options for connecting and polling a Modbus TCP device.
@@ -52,7 +52,7 @@ pub enum ClientError {
     #[error("invalid socket address {0}:{1}")]
     InvalidAddress(String, u16),
     #[error("modbus transport error: {0}")]
-    Modbus(#[from] tokio_modbus::Error),
+    Modbus(std::io::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("request timed out after {timeout_ms}ms")]
@@ -161,7 +161,12 @@ impl ModbusClient {
     fn retry_delay_ms(&self, attempt: usize) -> u64 {
         let base = self.config.retry_backoff_ms.max(1);
         let shift = u32::try_from(attempt).unwrap_or(u32::MAX);
-        let delay = base.saturating_mul(1u64.saturating_shl(shift));
+        // saturating_shl is unstable/nightly. Use checked_shl or just shl if u32 is small enough.
+        // We clamp shift to 31 anyway in other places, but here let's be safe.
+        // If shift >= 64, 1 << shift wraps or panics? u64 args.
+        // Let's use checked_shl
+        let factor = 1u64.checked_shl(shift).unwrap_or(u64::MAX); 
+        let delay = base.saturating_mul(factor);
         let max = self.config.retry_max_backoff_ms.max(base);
         min(delay, max)
     }

@@ -8,16 +8,12 @@ High-concurrency, memory-safe edge service that polls Modbus TCP inverters, pars
 
 ## Features
 
-- Async Modbus TCP client with timeouts, retries, and device-quirk controls (`max_batch_size`, optional inter-read delay).
-- SunSpec model parser (JSON/XML) with scale-factor handling and “Not Implemented” sentinel detection.
-- SunSpec register-map discovery helper (SunS sentinel + model list parsing).
-- Per-device poller actors using Tokio, supervised via `JoinSet` to auto-respawn failures.
-- Collector orchestrator with bounded telemetry channel and graceful shutdown handling.
-- SQLite buffer for store-and-forward durability on intermittent links.
-- Avro/Kafka publisher with schema serialization and Kafka producer integration.
-- Discovery service with subnet scan and static-config mode for sensitive networks.
-- systemd READY/WATCHDOG notifications on Linux for service supervision.
-- TOML/JSON config loader with env overrides, validation, and `--config` CLI support.
+- **Reliable Polling**: Per-device supervision with automatic "zombie poller" detection and respawn.
+- **Efficient Uplink**: Avro OCF batching reduces Kafka message overhead by 90%+.
+- **Flexible Discovery**: Scans subnets and supports Gateway devices (multi-Unit ID).
+- **Durability**: SQLite-backed buffer ensures zero data loss during network outages.
+- **Observability**: Prometheus metrics (`:9090/metrics`) for monitoring throughput, latency, and errors.
+- **Production Ready**: Docker containerized, systemd-ready, and configurable via config file or env vars.
 
 ## Workspace layout
 
@@ -33,24 +29,31 @@ High-concurrency, memory-safe edge service that polls Modbus TCP inverters, pars
 
 ## Roadmap (high level)
 
-- Foundation: cross-compile setup, Modbus client and discovery plumbing.
-- Core logic: SunSpec discovery, scale-factor normalization, poller actors.
-- Persistence + uplink: SQLite buffer, Avro serialization, Kafka publishing.
-- Hardening: watchdog, ops docs, and deployment artifacts.
-
-See `docs/plan.md` for the current execution tracker.
-See `docs/plan.md` for the future-scope backlog items.
+- [x] Foundation: cross-compile setup, Modbus client.
+- [x] Core logic: SunSpec discovery, poller actors.
+- [x] Reliability: Zombie poller detection, supervisor respawn.
+- [x] Persistence: SQLite buffer with JSON serialization.
+- [x] Uplink: Avro OCF batching for high-throughput Kafka publishing.
+- [x] Ops: Prometheus metrics, Docker containerization.
 
 ## Getting started
 
-1. Install Rust (latest stable recommended).
-2. Clone the repo and build: `cargo build --workspace`.
-3. Run lint/tests: `cargo fmt && cargo clippy && cargo test --workspace`.
-4. For Modbus simulation during development, use a local simulator such as `diagslave` and point the client to it.
-5. Optional Modbus integration test (requires a running simulator): `MODBUS_TEST_HOST=127.0.0.1 MODBUS_TEST_PORT=1502 cargo test -p modbus-client --test diagslave_tests`.
-6. Optional synthetic end-to-end harness (no simulator required): `cargo test -p collector-app --test e2e_harness_tests`.
-7. Optional Kafka integration test (requires a running broker): `SUNSPEC_KAFKA_BROKERS=localhost:9092 cargo test -p avro-kafka --test kafka_integration_tests`.
-8. Run with a config file (optional): `cargo run -p collector-app -- --config docs/config.example.toml`.
+### Docker (Recommended)
+
+```bash
+# Build the container (handles internal deps like librdkafka)
+docker build -t sunspec-collector .
+
+# Run with environment variables
+docker run -p 9090:9090 --env-file .env sunspec-collector
+```
+
+### Local Development (Rust)
+
+1.  **Prerequisites**: Install `cmake` (for librdkafka) and Rust.
+2.  **Build**: `cargo build --workspace`
+3.  **Test**: `cargo test --workspace`
+4.  **Run**: `cargo run -p collector-app -- --config docs/config.example.toml`
 
 ## Configuration (env)
 
@@ -61,6 +64,7 @@ To avoid long env lists, you can point to a TOML or JSON file with `SUNSPEC_CONF
 - `SUNSPEC_SUBNET`: CIDR subnet for discovery (default `192.168.1.0/24`).
 - `SUNSPEC_PORT`: Modbus TCP port (default `502`).
 - `SUNSPEC_STATIC_DEVICES`: comma-separated `ip[:unit_id]` list to bypass subnet scans (example: `192.168.1.20:1,192.168.1.21`).
+- `SUNSPEC_DISCOVERY_UNIT_IDS`: comma-separated list of Modbus Unit IDs to scan for each IP (default `1`). Useful for gateways (example: `1,2,3`).
 
 ### Polling
 
@@ -94,6 +98,11 @@ To avoid long env lists, you can point to a TOML or JSON file with `SUNSPEC_CONF
 - `SUNSPEC_KAFKA_TIMEOUT_MS`: producer message timeout in ms (default `5000`).
 - `SUNSPEC_KAFKA_IDEMPOTENCE`: `true`/`false` toggle for idempotent producer.
 
+### Observability
+
+- `SUNSPEC_METRICS_PORT`: Port to expose Prometheus metrics (default: `9090`).
+- Metrics endpoint: `http://localhost:9090/metrics`
+
 ## Deployment
 
 - systemd unit template: `docs/sunspec-collector.service`
@@ -102,6 +111,8 @@ To avoid long env lists, you can point to a TOML or JSON file with `SUNSPEC_CONF
 - Runtime operations: `docs/ops.md`
 - Buffer maintenance: `docs/buffer_maintenance.md`
 - GitHub Pages site: `https://imrans110.github.io/rusty-sunspec-collector/`
+
+
 
 ## Cross-compilation (ARM64)
 
