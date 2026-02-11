@@ -8,7 +8,8 @@ title = "Rusty SunSpec Collector"
 [output.html]
 git-repository-url = "https://github.com/imrans110/rusty-sunspec-collector"
 site-url = "/rusty-sunspec-collector/"
-theme = "ayu"
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
 
 [output.html.search]
 enable = true
