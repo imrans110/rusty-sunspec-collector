@@ -49,9 +49,7 @@ impl Default for ClientConfig {
 pub enum ClientError {
     #[error("invalid socket address {0}:{1}")]
     InvalidAddress(String, u16),
-    #[error("modbus transport error: {0}")]
-    Modbus(std::io::Error),
-    #[error("io error: {0}")]
+    #[error("io/modbus error: {0}")]
     Io(#[from] std::io::Error),
     #[error("request timed out after {timeout_ms}ms")]
     Timeout { timeout_ms: u64 },
@@ -77,17 +75,18 @@ impl ModbusClient {
         })
     }
 
-    pub async fn read_range(&self, unit_id: u8, start: u16, count: u16) -> Result<Vec<u16>, ClientError> {
+    pub async fn read_range(
+        &self,
+        unit_id: u8,
+        start: u16,
+        count: u16,
+    ) -> Result<Vec<u16>, ClientError> {
         if count == 0 {
             return Ok(Vec::new());
         }
 
         let mut ctx = self.context.lock().await;
-        let batch_size = self
-            .config
-            .max_batch_size
-            .unwrap_or(count)
-            .max(1u16);
+        let batch_size = self.config.max_batch_size.unwrap_or(count).max(1u16);
         let mut remaining = count;
         let mut offset = 0u16;
         let mut out = Vec::with_capacity(count as usize);
@@ -125,8 +124,11 @@ impl ModbusClient {
         let mut last_error = None;
 
         loop {
-            let request = ctx.read_holding_registers(start, count);
-            let result = timeout(Duration::from_millis(self.config.timeout_ms), request).await;
+            let result = timeout(
+                Duration::from_millis(self.config.timeout_ms),
+                ctx.read_holding_registers(start, count),
+            )
+            .await;
             match result {
                 Ok(Ok(values)) => {
                     debug!(unit_id, start, count, "modbus read ok");
@@ -134,7 +136,7 @@ impl ModbusClient {
                 }
                 Ok(Err(err)) => {
                     warn!(unit_id, start, count, error = %err, "modbus read error");
-                    last_error = Some(ClientError::Modbus(err));
+                    last_error = Some(ClientError::Io(err));
                 }
                 Err(_) => {
                     warn!(unit_id, start, count, "modbus read timeout");
