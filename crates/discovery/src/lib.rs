@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
@@ -46,6 +44,8 @@ pub enum DiscoveryError {
     InvalidConcurrency,
     #[error("scan task failed: {0}")]
     TaskJoin(#[from] tokio::task::JoinError),
+    #[error("concurrency semaphore closed unexpectedly")]
+    SemaphoreClosed,
 }
 
 pub async fn discover(config: DiscoveryConfig) -> Result<Vec<DeviceIdentity>, DiscoveryError> {
@@ -87,7 +87,7 @@ pub async fn discover_subnet(
             .clone()
             .acquire_owned()
             .await
-            .expect("semaphore closed");
+            .map_err(|_| DiscoveryError::SemaphoreClosed)?;
         let ip = u32_to_ipv4(current);
         let port = config.port;
         let timeout_ms = config.per_host_timeout_ms;

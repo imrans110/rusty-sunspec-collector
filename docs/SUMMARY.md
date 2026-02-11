@@ -1,14 +1,15 @@
 # Summary
 
-- [Index](../README.md)
+[Introduction](introduction.md)
 
-# Deployment
-- [Build, Test, Run](build.md)
-- [Configuration](config.example.toml)
+---
 
-# Operations
-- [Runtime Operations](ops.md)
-- [Buffer Maintenance](buffer_maintenance.md)
+- [Developer Guide](DEVELOPER_GUIDE.md)
+- [Configuration](configuration.md)
+- [Architecture](ARCHITECTURE.md)
+- [Operations](ops.md)
 
-# Design
-- [Execution Plan](plan.md)
+---
+
+- [Design Plan](plan.md)
+- [Code Review & Audit](CODE_REVIEW.md)

@@ -1,4 +1,8 @@
-# Rusty SunSpec Collector plan
+# Design Plan
+
+> This is the original design document written before implementation. For the current architecture, see [Architecture Guide](ARCHITECTURE.md). For the post-implementation audit, see [Code Review](CODE_REVIEW.md).
+
+# Rusty SunSpec Collector — Design Plan
 
 ## 1. Executive summary and strategic imperative
 
@@ -143,11 +147,16 @@ image = "my-sunspec-builder"
 
 #### 4.2.1 Project structure
 
-- `src/models/`: generated SunSpec structs.
-- `src/poller/`: Modbus logic and actors.
-- `src/buffer/`: SQLite buffer.
-- `src/uplink/`: Kafka producer.
-- `src/main.rs`: orchestrator.
+The project uses a Cargo workspace with domain-separated crates:
+
+- `crates/types/`: shared data types (`PointValue`, `DeviceIdentity`).
+- `crates/discovery/`: network scanning and device enumeration.
+- `crates/modbus-client/`: Modbus TCP client with retry and backoff.
+- `crates/sunspec-parser/`: SunSpec model parsing (JSON, XML, registers).
+- `crates/poller-actor/`: per-device async polling loop.
+- `crates/buffer/`: SQLite-backed durable message queue.
+- `crates/avro-kafka/`: Avro serialization and Kafka producer.
+- `crates/collector-app/`: main binary orchestrator (`main.rs`, `config.rs`).
 
 #### 4.2.2 Main event loop
 
@@ -189,10 +198,14 @@ async fn main() -> Result<()> {
 
 ## 6. Execution roadmap
 
-- Foundation (Weeks 1-2): Cross-compilation setup, dependency selection, basic Modbus actor.
-- Core logic (Weeks 3-4): SunSpec discovery, scale-factor normalization, unit tests.
-- Persistence and uplink (Weeks 5-6): SQLite buffer, Kafka producer, Avro serialization.
-- Hardening (Weeks 7-8): Watchdog, structured logging, load testing, deployment artifacts.
+All core phases are complete:
+
+- [x] Foundation: Cross-compilation setup, dependency selection, Modbus actor.
+- [x] Core logic: SunSpec discovery, poller actors, model parsing.
+- [x] Persistence and uplink: SQLite buffer, Kafka producer, Avro serialization.
+- [x] Hardening: Watchdog, structured logging, Docker, CI/CD, code audit.
+
+See [CODE_REVIEW.md](CODE_REVIEW.md) for the full audit report and remaining future work.
 
 ## 7. Conclusion
 
@@ -202,9 +215,8 @@ A Rust-based SunSpec collector provides a reliable, high-performance edge data p
 
 ### 8.1 Dependency management and crate selection
 
-- `tokio` with `full` + `macros`.
-- `sunspec` with `tokio` + `serde`.
-- `tokio-modbus` compatible with `sunspec`.
+- `tokio` with specific features: `rt-multi-thread`, `macros`, `io-util`, `net`, `time`, `sync`, `signal`.
+- `tokio-modbus` for async Modbus TCP.
 - `sqlx` with `sqlite` + `runtime-tokio-rustls` + `macros`.
 - `rdkafka` with `cmake-build` + `ssl`.
 - `apache-avro` with `derive`.
@@ -245,7 +257,6 @@ CREATE TABLE IF NOT EXISTS telemetry_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     topic TEXT NOT NULL,
     payload BLOB NOT NULL,
-    retry_count INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON telemetry_queue(created_at);
@@ -253,9 +264,11 @@ CREATE INDEX IF NOT EXISTS idx_created_at ON telemetry_queue(created_at);
 
 Operational logic:
 
-- Insert on poll.
-- Drain ordered by id.
-- Delete on successful Kafka send.
+- Insert JSON-serialized `PollSample` on each poll cycle.
+- Drain ordered by id in configurable batch sizes.
+- Separate corrupt messages (delete immediately) from valid messages.
+- Delete valid messages only after successful Kafka publish.
+- Failed publishes leave messages in buffer for retry next cycle.
 
 ### 8.5 Uplink configuration
 
@@ -273,24 +286,12 @@ Operational logic:
 
 ### 8.7 Resilience engineering
 
-Systemd service (`/etc/systemd/system/sunspec-collector.service`):
+See [sunspec-collector.service](sunspec-collector.service) for the full systemd unit file with security hardening.
 
-```ini
-[Unit]
-Description=Rust SunSpec Collector
-After=network.target
-
-[Service]
-Type=notify
-ExecStart=/usr/local/bin/sunspec-collector
-Restart=always
-RestartSec=5
-WatchdogSec=10
-LimitNOFILE=4096
-
-[Install]
-WantedBy=multi-user.target
-```
+Key systemd features:
+- `Type=notify` with `WatchdogSec` for health monitoring.
+- `Restart=always` with `RestartSec=5` for automatic recovery.
+- Security directives: `NoNewPrivileges`, `ProtectSystem`, `ProtectHome`.
 
 Watchdog task:
 

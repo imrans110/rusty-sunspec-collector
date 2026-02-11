@@ -27,6 +27,7 @@ pub struct CollectorConfig {
     pub poller: ActorConfig,
     pub base_address: u16,
     pub discovery_register_count: u16,
+    pub discovery_unit_ids: Vec<u8>,
     pub channel_capacity: usize,
     pub respawn_delay_ms: u64,
     pub buffer_path: String,
@@ -154,8 +155,6 @@ impl Default for CollectorConfig {
             kafka_timeout_ms: None,
             kafka_topic: None,
             kafka_enable_idempotence: None,
-            kafka_topic: None,
-            kafka_enable_idempotence: None,
             metrics_port: 9090,
         }
     }
@@ -255,6 +254,7 @@ struct FileDiscoveryConfig {
     port: Option<u16>,
     max_concurrency: Option<usize>,
     per_host_timeout_ms: Option<u64>,
+    unit_ids: Option<Vec<u8>>,
     static_devices: Option<Vec<FileDeviceConfig>>,
 }
 
@@ -476,6 +476,19 @@ fn parse_static_devices(value: &str) -> Vec<DeviceIdentity> {
                 ip: ip.to_string(),
                 unit_id: unit,
             })
+        })
+        .collect()
+}
+
+fn parse_unit_id_list(value: &str) -> Vec<u8> {
+    value
+        .split(',')
+        .filter_map(|entry| {
+            let trimmed = entry.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            trimmed.parse::<u8>().ok()
         })
         .collect()
 }

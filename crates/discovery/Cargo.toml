@@ -1,7 +1,10 @@
 [package]
 name = "discovery"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CIDR subnet scanning and static device discovery for SunSpec devices"
 
 [dependencies]
 tokio = { workspace = true }

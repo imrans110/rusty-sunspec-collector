@@ -1,8 +1,12 @@
 target/
 **/*.rs.bk
-Cargo.lock
 .git/
+.github/
+docs/
+.DS_Store
+.env
+.env.local
+*.sqlite*
 .gitignore
 .dockerignore
-Dockerfile
-sunspec-buffer.sqlite*
+docker/

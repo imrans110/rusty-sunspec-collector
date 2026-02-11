@@ -1,7 +1,10 @@
 [package]
 name = "avro-kafka"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Avro OCF serialization with Kafka producer"
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 
 /// Raw point values before SunSpec scale factors are applied.

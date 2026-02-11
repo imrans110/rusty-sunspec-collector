@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::cmp::min;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -160,12 +158,8 @@ impl ModbusClient {
 
     fn retry_delay_ms(&self, attempt: usize) -> u64 {
         let base = self.config.retry_backoff_ms.max(1);
-        let shift = u32::try_from(attempt).unwrap_or(u32::MAX);
-        // saturating_shl is unstable/nightly. Use checked_shl or just shl if u32 is small enough.
-        // We clamp shift to 31 anyway in other places, but here let's be safe.
-        // If shift >= 64, 1 << shift wraps or panics? u64 args.
-        // Let's use checked_shl
-        let factor = 1u64.checked_shl(shift).unwrap_or(u64::MAX); 
+        let shift = u32::try_from(attempt).unwrap_or(63).min(63);
+        let factor = 1u64 << shift;
         let delay = base.saturating_mul(factor);
         let max = self.config.retry_max_backoff_ms.max(base);
         min(delay, max)

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sqlx::sqlite::SqlitePoolOptions;
@@ -42,9 +40,17 @@ pub enum BufferError {
 
 impl BufferStore {
     pub async fn new(path: &str) -> Result<Self, BufferError> {
-        let url = sqlite_url(path);
+        let config = BufferConfig {
+            path: path.to_string(),
+            ..Default::default()
+        };
+        Self::with_config(config).await
+    }
+
+    pub async fn with_config(config: BufferConfig) -> Result<Self, BufferError> {
+        let url = sqlite_url(&config.path);
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(config.max_connections)
             .connect(&url)
             .await?;
 
@@ -59,7 +65,6 @@ impl BufferStore {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,\
                 topic TEXT NOT NULL,\
                 payload BLOB NOT NULL,\
-                retry_count INTEGER DEFAULT 0,\
                 created_at INTEGER NOT NULL\
             )",
         )
@@ -69,7 +74,7 @@ impl BufferStore {
             .execute(&pool)
             .await?;
 
-        info!(path = %path, "buffer initialized");
+        info!(path = %config.path, max_connections = config.max_connections, "buffer initialized");
 
         Ok(Self { pool })
     }

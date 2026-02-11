@@ -8,7 +8,6 @@ use tokio::task::JoinSet;
 use tokio::time::{sleep, timeout};
 use tracing::{info, warn};
 
-
 use axum::{routing::get, Router};
 use metrics::{counter, gauge, histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
@@ -26,6 +25,7 @@ use types::DeviceIdentity;
 
 const DEFAULT_UPLINK_BACKOFF_MS: u64 = 1_000;
 const DEFAULT_UPLINK_BACKOFF_MAX_MS: u64 = 30_000;
+const MAX_RESPAWN_DELAY_MS: u64 = 60_000;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,10 +36,6 @@ async fn main() -> Result<()> {
     config.validate().context("config validation failed")?;
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    let builder = PrometheusBuilder::new();
-    let handle = builder
-        .install_recorder()
-        .context("failed to install metrics recorder")?;
     let builder = PrometheusBuilder::new();
     let handle = builder
         .install_recorder()
@@ -100,6 +96,7 @@ async fn main() -> Result<()> {
     let specs = build_poller_specs(&config, &devices, tx.clone(), shutdown_rx.clone()).await;
 
     let mut join_set = JoinSet::new();
+    let mut respawn_counts: HashMap<String, u32> = HashMap::new();
     for spec in specs.values() {
         spawn_poller(spec.clone(), &mut join_set, Duration::from_millis(0));
     }
@@ -119,16 +116,25 @@ async fn main() -> Result<()> {
                 if let Some(result) = maybe_result {
                     match result {
                         Ok((id, outcome)) => {
-                            if let Err(err) = outcome {
+                            if let Err(ref err) = outcome {
                                 warn!(device = %id, error = %err, "poller exited with error");
                             } else {
                                 info!(device = %id, "poller exited cleanly");
                             }
                             if let Some(spec) = specs.get(&id) {
+                                let count = respawn_counts.entry(id.clone()).or_insert(0);
+                                let delay = if outcome.is_err() {
+                                    *count = count.saturating_add(1);
+                                    respawn_delay(config.respawn_delay_ms, *count)
+                                } else {
+                                    *count = 0;
+                                    Duration::from_millis(config.respawn_delay_ms)
+                                };
+                                info!(device = %id, delay_ms = delay.as_millis(), respawn_count = *count, "respawning poller");
                                 spawn_poller(
                                     spec.clone(),
                                     &mut join_set,
-                                    Duration::from_millis(config.respawn_delay_ms),
+                                    delay,
                                 );
                             }
                         }
@@ -325,73 +331,69 @@ async fn uplink_task(
                 }
 
                 let mut samples = Vec::with_capacity(batch.len());
-                let mut ids_to_ack = Vec::with_capacity(batch.len());
-                
-                // Deserialization phase
+                let mut valid_ids = Vec::with_capacity(batch.len());
+                let mut corrupt_ids = Vec::new();
+
+                // Deserialization phase: separate valid from corrupt
                 for message in &batch {
                     match serde_json::from_slice::<PollSample>(&message.payload) {
                         Ok(sample) => {
                             samples.push(sample);
-                            ids_to_ack.push(message.id);
+                            valid_ids.push(message.id);
                         }
                         Err(err) => {
-                             // Corrupt data in buffer: log and mark for deletion to prevent head-of-line blocking
                              warn!(id = message.id, error = %err, "json deserialize failed, discarding");
-                             ids_to_ack.push(message.id);
+                             corrupt_ids.push(message.id);
                         }
                     }
                 }
 
+                // Always delete corrupt messages to prevent head-of-line blocking
+                if !corrupt_ids.is_empty() {
+                    if let Err(err) = buffer.delete_batch(&corrupt_ids).await {
+                        warn!(error = %err, "buffer delete corrupt failed");
+                    }
+                }
+
                 let valid_count = samples.len();
-                let mut encountered_error = false;
-                
+                let mut publish_failed = false;
+
                 if !samples.is_empty() {
-                    // Batch publish
                     match publisher.serialize_batch(&samples) {
                         Ok(avro_payload) => {
                              let start = std::time::Instant::now();
                              match publisher.publish_bytes(publisher.topic(), &avro_payload).await {
                                  Ok(()) => {
-                                     // Success! unique batch sent.
                                      let duration = start.elapsed();
                                      histogram!("uplink_publish_latency", duration);
                                      counter!("uplink_messages_sent", "batch_size" => valid_count.to_string()).increment(valid_count as u64);
                                  }
                                  Err(err) => {
                                      warn!(error = %err, "uplink publish batch failed");
-                                     encountered_error = true;
+                                     publish_failed = true;
                                      counter!("uplink_publish_error").increment(1);
-                                     // Reset ids to ack, we must RETRY these valid samples.
-                                     // However, we still want to delete the explicitly corrupt ones (which were not in samples).
-                                     // To do this cleanly: 
-                                     // 1. Separate valid IDs vs corrupt IDs.
-                                     // 2. Only ack valid IDs if publish succeeds.
-                                     // 3. Always ack corrupt IDs.
-                                     // simplified: if publish fails, we just don't ack *anything* this cycle. 
-                                     // Corrupt messages will stay and be warned about again. (Suboptimal but safe).
-                                     // Actually, let's just fail the whole batch for now.
                                  }
                              }
                         }
                         Err(err) => {
                             warn!(error = %err, "avro batch serialization failed");
-                            encountered_error = true;
+                            publish_failed = true;
                         }
                     }
                 }
 
-                if encountered_error {
+                if publish_failed {
+                    // Valid messages stay in buffer for retry next cycle
                     failure_count = failure_count.saturating_add(1);
-                    total_failed = total_failed.saturating_add(batch.len() as u64);
+                    total_failed = total_failed.saturating_add(valid_count as u64);
                 } else {
-                    // Ack processed messages (valid + corrupt ones we filtered out)
-                    if !ids_to_ack.is_empty() {
-                        if let Err(err) = buffer.delete_batch(&ids_to_ack).await {
+                    // Ack only valid messages on successful publish
+                    if !valid_ids.is_empty() {
+                        if let Err(err) = buffer.delete_batch(&valid_ids).await {
                             warn!(error = %err, "buffer delete failed");
-                             // If delete fails, we will re-process them. Idempotency handling needed downstream or just accept duples.
                         }
                     }
-                    
+
                     total_sent = total_sent.saturating_add(valid_count as u64);
                     failure_count = 0;
                 }
@@ -474,6 +476,17 @@ fn uplink_delay(
     } else {
         base
     }
+}
+
+fn respawn_delay(base_ms: u64, failure_count: u32) -> Duration {
+    if failure_count == 0 {
+        return Duration::from_millis(base_ms);
+    }
+    let shift = failure_count.saturating_sub(1).min(31);
+    let factor = 1u64 << shift;
+    let candidate = base_ms.saturating_mul(factor);
+    let capped = candidate.min(MAX_RESPAWN_DELAY_MS);
+    Duration::from_millis(capped.max(base_ms))
 }
 
 fn parse_config_arg() -> Option<String> {

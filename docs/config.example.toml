@@ -3,6 +3,7 @@ subnet = "192.168.1.0/24"
 port = 502
 max_concurrency = 64
 per_host_timeout_ms = 200
+unit_ids = [1]                    # Modbus Unit IDs to scan per host (useful for gateways)
 
 [[discovery.static_devices]]
 ip = "192.168.1.20"

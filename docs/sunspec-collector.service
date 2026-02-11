@@ -11,5 +11,14 @@ WatchdogSec=10
 LimitNOFILE=4096
 EnvironmentFile=-/etc/sunspec-collector.env
 
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/sunspec-collector
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
 [Install]
 WantedBy=multi-user.target

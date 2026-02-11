@@ -1,3 +1,11 @@
 /target
 **/*.rs.bk
-Cargo.lock
+.DS_Store
+.env
+.env.local
+*.sqlite*
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

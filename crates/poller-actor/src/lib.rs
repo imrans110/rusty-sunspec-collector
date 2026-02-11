@@ -1,11 +1,10 @@
-#![allow(dead_code)]
-
+use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 use tokio::sync::{mpsc, watch};
 use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use modbus_client::{ClientConfig, ClientError, ModbusClient};
 use metrics::counter;
@@ -82,6 +81,7 @@ impl PollerActor {
         let mut modbus_config = self.modbus_config.clone();
         modbus_config.timeout_ms = self.config.request_timeout.as_millis() as u64;
         let client = ModbusClient::connect(modbus_config).await?;
+        let device_salt = device_hash(&self.identity);
         let mut iteration = 0u64;
         let mut consecutive_errors = 0u32;
 
@@ -97,6 +97,7 @@ impl PollerActor {
 
             for model in &self.models {
                 if model.length == 0 {
+                    debug!(ip = %self.identity.ip, model_id = model.id, "skipping zero-length model");
                     continue;
                 }
 
@@ -105,7 +106,6 @@ impl PollerActor {
                     .await
                 {
                     Ok(registers) => {
-                        // Reset error counter on successful read (at least partial success keeps us alive)
                         if consecutive_errors > 0 {
                              info!(ip = %self.identity.ip, "connection recovered");
                              consecutive_errors = 0;
@@ -161,7 +161,7 @@ impl PollerActor {
             iteration = iteration.wrapping_add(1);
             let elapsed = cycle_start.elapsed();
             let lag = elapsed.saturating_sub(self.config.poll_interval);
-            let delay = jittered_delay(self.config.poll_interval, self.config.jitter_ms, iteration);
+            let delay = jittered_delay(self.config.poll_interval, self.config.jitter_ms, iteration, device_salt);
             info!(
                 ip = %self.identity.ip,
                 unit_id = self.identity.unit_id,
@@ -188,15 +188,24 @@ impl PollerActor {
     }
 }
 
-fn jittered_delay(base: Duration, jitter_ms: u64, iteration: u64) -> Duration {
+fn jittered_delay(base: Duration, jitter_ms: u64, iteration: u64, device_salt: u64) -> Duration {
     if jitter_ms == 0 {
         return base;
     }
 
     let jitter_window = jitter_ms.max(1);
-    let seed = unix_ms().wrapping_add(iteration.wrapping_mul(1_664_525));
+    let seed = device_salt
+        .wrapping_add(iteration.wrapping_mul(1_664_525))
+        .wrapping_add(unix_ms());
     let offset = seed % jitter_window;
     base + Duration::from_millis(offset)
+}
+
+fn device_hash(identity: &DeviceIdentity) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    identity.ip.hash(&mut hasher);
+    identity.unit_id.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn unix_ms() -> u64 {

@@ -14,9 +14,13 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
+rust-version = "1.80"
+repository = "https://github.com/imrans110/rusty-sunspec-collector"
+homepage = "https://github.com/imrans110/rusty-sunspec-collector"
+authors = ["Imran S."]
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "net", "time", "sync", "signal"] }
 tokio-modbus = "0.9"
 tracing = "0.1"
 thiserror = "1.0"
