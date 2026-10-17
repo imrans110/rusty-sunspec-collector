@@ -10,6 +10,8 @@ git-repository-url = "https://github.com/imrans110/rusty-sunspec-collector"
 site-url = "/rusty-sunspec-collector/"
 default-theme = "ayu"
 preferred-dark-theme = "ayu"
+# Renders ```mermaid blocks (the architecture diagram); see the file.
+additional-js = ["mermaid-init.js"]
 
 [output.html.search]
 enable = true
