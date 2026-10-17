@@ -1,0 +1,380 @@
+name: Release
+
+# Every run builds and tests everything a release ships: x86_64 and aarch64 Linux archives
+# (cross-compiled once, with OpenSSL linked statically), install.sh and SHA256SUMS, and
+# multi-arch collector and simulator images packaged from the same binaries. Pushes to main,
+# pull requests that change the release tooling, and manual runs stop there (a dry run).
+# Pushing a v* tag also publishes the images to GHCR and creates the GitHub Release, whose
+# notes are the tag's CHANGELOG section. See "Cutting a release" in CONTRIBUTING.md.
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "Dockerfile"
+      - "docker/Dockerfile.cross"
+      - "Cross.toml"
+      - "scripts/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # The cross images are Ubuntu 20.04; the binaries must not need a newer glibc.
+  GLIBC_MAX: "2.31"
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      crate_version: ${{ steps.version.outputs.crate_version }}
+      notes_section: ${{ steps.version.outputs.notes_section }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Lint the release scripts
+        run: shellcheck scripts/*.sh
+
+      - name: Work out the version
+        id: version
+        run: |
+          crate_version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "collector-app") | .version')
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version=${GITHUB_REF_NAME#v}
+            if [ "$version" != "$crate_version" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $crate_version"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "::error::$GITHUB_REF_NAME points at a commit that is not on main"
+              exit 1
+            fi
+            notes_section=$version
+          else
+            version="$crate_version-dev.${GITHUB_SHA::7}"
+            notes_section=Unreleased
+          fi
+          scripts/changelog-section.sh "$notes_section" > /dev/null
+          prerelease=false
+          if [[ "$version" == *-* ]]; then prerelease=true; fi
+          publish=false
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/v* ]]; then publish=true; fi
+          {
+            echo "version=$version"
+            echo "crate_version=$crate_version"
+            echo "notes_section=$notes_section"
+            echo "prerelease=$prerelease"
+            echo "publish=$publish"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            deb_arch: amd64
+            multiarch: x86_64-linux-gnu
+            elf_machine: X86-64
+          - target: aarch64-unknown-linux-gnu
+            deb_arch: arm64
+            multiarch: aarch64-linux-gnu
+            elf_machine: AArch64
+    env:
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build the cross image
+        run: |
+          docker build -t "sunspec-cross-$TARGET" -f docker/Dockerfile.cross \
+            --build-arg "TARGET=$TARGET" --build-arg "DEB_ARCH=${{ matrix.deb_arch }}" \
+            --build-arg "MULTIARCH=${{ matrix.multiarch }}" docker
+
+      - name: Build
+        run: |
+          cross build --release --locked --target "$TARGET" \
+            -p collector-app -p sunspec-sim --features collector-app/vendored-openssl
+
+      - name: Check the binaries are portable
+        run: |
+          for bin in collector-app sunspec-sim; do
+            path="target/$TARGET/release/$bin"
+            readelf -h "$path" | grep -q "Machine:.*${{ matrix.elf_machine }}"
+            needed=$(readelf -d "$path" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p')
+            echo "$bin links:" $needed
+            for lib in $needed; do
+              case "$lib" in
+                libc.so.6 | libm.so.6 | libdl.so.2 | libpthread.so.0 | librt.so.1 | libgcc_s.so.1 | libz.so.1 | ld-linux-*) ;;
+                *) echo "::error::$bin links $lib, which target systems may not have"; exit 1 ;;
+              esac
+            done
+            glibc=$(readelf -W --dyn-syms "$path" | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
+            echo "$bin needs glibc $glibc"
+            if [ "$(printf '%s\n' "$glibc" "$GLIBC_MAX" | sort -V | tail -1)" != "$GLIBC_MAX" ]; then
+              echo "::error::$bin needs glibc $glibc, newer than $GLIBC_MAX"
+              exit 1
+            fi
+          done
+
+      - name: Run the binaries
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          "target/$TARGET/release/collector-app" --version
+          "target/$TARGET/release/sunspec-sim" --version
+
+      - name: Package
+        run: scripts/package-release.sh "$VERSION" "$TARGET" "target/$TARGET/release"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.target }}
+          path: dist/sunspec-collector-*.tar.gz
+          if-no-files-found: error
+
+  assemble:
+    name: Assemble and test the install
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      CRATE_VERSION: ${{ needs.prepare.outputs.crate_version }}
+      NOTES_SECTION: ${{ needs.prepare.outputs.notes_section }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+
+      - name: Add install.sh and SHA256SUMS
+        run: |
+          sed "s/@VERSION@/$VERSION/" scripts/install.sh > dist/install.sh
+          cd dist
+          sha256sum -- *.tar.gz install.sh > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Install with install.sh as root
+        run: |
+          sudo SUNSPEC_BASE_URL="file://$PWD/dist" sh dist/install.sh
+          collector-app --version | grep -qx "collector-app $CRATE_VERSION"
+          sunspec-sim --version | grep -qx "sunspec-sim $CRATE_VERSION"
+          systemd-analyze verify /etc/systemd/system/sunspec-collector.service
+
+      - name: Run the service against the simulator
+        run: |
+          nohup sunspec-sim --bind 127.0.0.1:1502 --units 1 > sim.log 2>&1 &
+          printf '%s\n' SUNSPEC_STATIC_DEVICES=127.0.0.1:1 SUNSPEC_PORT=1502 \
+            | sudo tee -a /etc/sunspec-collector.env > /dev/null
+          sudo systemctl start sunspec-collector
+          for _ in $(seq 1 30); do
+            polls=$(curl -fsS localhost:9090/metrics 2>/dev/null \
+              | awk '/^sunspec_poll_success_total/ { n += $2 } END { print int(n) }')
+            if [ "${polls:-0}" -gt 0 ]; then
+              echo "successful polls: $polls"
+              systemctl is-active sunspec-collector
+              sudo test -s /var/lib/sunspec-collector/buffer.sqlite
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the installed service never polled the simulator"
+          exit 1
+
+      - name: Reinstall keeps the edited environment file
+        run: |
+          sudo SUNSPEC_BASE_URL="file://$PWD/dist" sh dist/install.sh
+          sudo grep -qx SUNSPEC_STATIC_DEVICES=127.0.0.1:1 /etc/sunspec-collector.env
+          sudo systemctl restart sunspec-collector
+          sudo systemctl stop sunspec-collector
+          sudo journalctl -u sunspec-collector --no-pager | grep -q "collector stopped"
+
+      - name: Service logs
+        if: always()
+        run: sudo journalctl -u sunspec-collector --no-pager | tail -50
+
+      - name: Write the release notes
+        run: |
+          {
+            echo "## Install"
+            echo
+            echo "On a Linux machine (x86_64 or aarch64, glibc $GLIBC_MAX or newer) with systemd:"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/install.sh | sudo sh"
+            echo '```'
+            echo
+            echo "With Docker (linux/amd64 and linux/arm64):"
+            echo
+            echo '```sh'
+            echo "docker pull ghcr.io/$GITHUB_REPOSITORY_OWNER/sunspec-collector:$VERSION"
+            echo "docker run --rm -p 1502:1502 ghcr.io/$GITHUB_REPOSITORY_OWNER/sunspec-simulator:$VERSION --units 1,2"
+            echo '```'
+            echo
+            echo "Each archive holds collector-app, sunspec-sim, the systemd unit, the environment file,"
+            echo "an example config and the licenses; SHA256SUMS lists their checksums."
+            echo
+            scripts/changelog-section.sh "$NOTES_SECTION"
+          } > dist/RELEASE_NOTES.md
+          cat dist/RELEASE_NOTES.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+
+  images:
+    name: Image ${{ matrix.image }}
+    needs: [prepare, assemble]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: sunspec-collector
+            target: collector
+            binary: collector-app
+            description: Collects SunSpec inverter, meter and battery telemetry over Modbus TCP and publishes decoded, keyed Avro records to Kafka
+          - image: sunspec-simulator
+            target: simulator
+            binary: sunspec-sim
+            description: Simulated SunSpec Modbus TCP devices for testing collectors without hardware
+    env:
+      CRATE_VERSION: ${{ needs.prepare.outputs.crate_version }}
+      PUBLISH: ${{ needs.prepare.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: dist
+
+      - name: Unpack the binaries
+        run: |
+          for archive in dist/*.tar.gz; do
+            name=$(basename "$archive" .tar.gz)
+            case "$name" in
+              *-x86_64-*) arch=amd64 ;;
+              *-aarch64-*) arch=arm64 ;;
+            esac
+            mkdir -p "dist/bin/$arch"
+            tar -xzf "$archive" -C "dist/bin/$arch" --strip-components=1 \
+              "$name/collector-app" "$name/sunspec-sim"
+          done
+          ls -lR dist/bin
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Smoke-test each platform
+        run: |
+          for arch in amd64 arm64; do
+            docker buildx build --platform "linux/$arch" --build-arg BINARIES=prebuilt \
+              --target "${{ matrix.target }}" --load -t "smoke:$arch" .
+            out=$(docker run --rm --platform "linux/$arch" "smoke:$arch" --version)
+            echo "linux/$arch: $out"
+            [ "$out" = "${{ matrix.binary }} $CRATE_VERSION" ]
+          done
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=MIT OR Apache-2.0
+          annotations: |
+            org.opencontainers.image.title=${{ matrix.image }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=MIT OR Apache-2.0
+
+      - if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build linux/amd64 and linux/arm64 (pushed on a tag)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          build-args: BINARIES=prebuilt
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+
+  publish:
+    name: Publish the GitHub Release
+    needs: [prepare, images]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/install.sh dist/SHA256SUMS \
+            --verify-tag --title "$GITHUB_REF_NAME" --notes-file dist/RELEASE_NOTES.md "${flags[@]}"

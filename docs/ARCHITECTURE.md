@@ -770,8 +770,8 @@ restart loops.
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| Linux x86_64 | Supported | systemd readiness and watchdog; Docker images |
-| Linux aarch64 | Cross-compiled | `cross` with `docker/Dockerfile.arm64`; built by CI (see [Building & Packaging](build.md)) |
+| Linux x86_64 | Supported | systemd readiness and watchdog; release archives (glibc 2.31+) and Docker images |
+| Linux aarch64 | Supported | Cross-compiled with `cross` and `docker/Dockerfile.cross`; release archives (glibc 2.31+) and Docker images (see [Building & Packaging](build.md#release-builds)) |
 | macOS | Development | systemd readiness and watchdog are no-ops |
 | Windows | Not tested | Only SIGINT (Ctrl-C) triggers a graceful stop |
 

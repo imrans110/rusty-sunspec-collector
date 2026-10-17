@@ -12,3 +12,6 @@
 
 # Test fixtures: public test certificates only (no private keys).
 !crates/*/tests/fixtures/*.pem
+
+# Release archives and images (scripts/package-release.sh)
+/dist

@@ -1,6 +1,6 @@
 # rusty-sunspec-collector
 
-[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-1b1b1f?logo=rust)](https://www.rust-lang.org/) [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-0f766e)](#license) [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3b82f6)](https://imrans110.github.io/rusty-sunspec-collector/) [![crates.io planned](https://img.shields.io/badge/crates.io-planned-6b7280)](https://crates.io/)
+[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-1b1b1f?logo=rust)](https://www.rust-lang.org/) [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-0f766e)](#license) [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3b82f6)](https://imrans110.github.io/rusty-sunspec-collector/) [![CI](https://github.com/imrans110/rusty-sunspec-collector/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/imrans110/rusty-sunspec-collector/actions/workflows/ci.yml)
 
 An edge service, written in Rust, that finds SunSpec devices (inverters, meters, batteries) on
 Modbus TCP, walks each device's SunSpec model chain, polls every model on a fixed schedule, and
@@ -44,6 +44,37 @@ dropped (and counted) instead of growing the buffer without limit.
   and invalid values stop the collector at startup instead of falling back to defaults.
 - **Simulator included**: `sunspec-sim` serves SunSpec register maps over Modbus TCP, so the test
   suite and the Docker stack run without hardware.
+
+## Install
+
+Each [release](https://github.com/imrans110/rusty-sunspec-collector/releases) has prebuilt Linux
+binaries for x86_64 and aarch64 and multi-arch Docker images. The binaries need glibc 2.31 or newer
+(Debian 11+, Ubuntu 20.04+, Raspberry Pi OS 11+) and nothing else: OpenSSL, librdkafka, SQLite
+and zstd are linked in.
+
+On a machine with systemd, install the latest release:
+
+```sh
+curl -fsSL https://github.com/imrans110/rusty-sunspec-collector/releases/latest/download/install.sh | sudo sh
+```
+
+The script checks the archive against the release's `SHA256SUMS` and installs `collector-app` and
+`sunspec-sim` in `/usr/local/bin`, the systemd unit, and `/etc/sunspec-collector.env` (kept on
+upgrades). Set your devices and Kafka brokers there, then run
+`sudo systemctl enable --now sunspec-collector`. To read the script before running it, download it
+and run `sudo sh install.sh`; `SUNSPEC_VERSION=0.2.0` picks a specific release.
+
+With Docker:
+
+```sh
+docker run -d --name sunspec-collector -p 9090:9090 -v sunspec-data:/app/data \
+  -e SUNSPEC_STATIC_DEVICES=192.168.1.50:1 -e SUNSPEC_KAFKA_BROKERS=kafka.internal:9092 \
+  ghcr.io/imrans110/sunspec-collector:latest
+```
+
+`ghcr.io/imrans110/sunspec-simulator` serves simulated devices for trying it without hardware. To
+build from source instead, see [Run without Docker](#run-without-docker) and
+[docs/build.md](docs/build.md).
 
 ## Quick start
 
@@ -187,9 +218,9 @@ The full metric list and suggested alerts are in [docs/ops.md](docs/ops.md).
   from `/usr/local/bin/collector-app` with `Type=notify`, a 30 s watchdog, a dynamic unprivileged
   user and `/var/lib/sunspec-collector` as its state directory. Settings come from
   `/etc/sunspec-collector.env` (start from [docs/sunspec-collector.env](docs/sunspec-collector.env)).
-- **Cross-compiling for aarch64**: build the image in `docker/Dockerfile.arm64`, then
-  `cross build --release --target aarch64-unknown-linux-gnu -p collector-app`. The output is
-  `target/aarch64-unknown-linux-gnu/release/collector-app`.
+- **Releases**: `.github/workflows/release.yml` cross-compiles x86_64 and aarch64 binaries with
+  `cross` and `docker/Dockerfile.cross`, packages them as archives and as multi-arch images, and
+  tests the install script under systemd. Pushing a `v*` tag publishes the release.
 
 Step-by-step instructions: [docs/build.md](docs/build.md) (building and packaging),
 [docs/ops.md](docs/ops.md) (running, monitoring, troubleshooting) and
@@ -263,7 +294,8 @@ build files change. See [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) for d
 ## Status
 
 The collector, buffer, uplink, simulator and deployment files are implemented and covered by the
-test suite and the CI end-to-end job. Releases are not yet published to crates.io. Open items are
+test suite and the CI end-to-end job. Binaries and images are published as GitHub releases; the
+crates are not published to crates.io. Open items are
 listed under [Limitations](#limitations); changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing

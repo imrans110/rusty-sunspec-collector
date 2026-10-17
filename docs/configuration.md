@@ -508,8 +508,8 @@ collector-app
 
 ### Docker with a config file
 
-The image's command is `/app/collector-app` with no entrypoint, so pass the file with
-`SUNSPEC_CONFIG` rather than as an argument:
+Mount the file and point `SUNSPEC_CONFIG` at it (or pass `--config /app/collector.toml` after
+the image name, since the image's entrypoint is `/app/collector-app`):
 
 ```sh
 docker run -d --name sunspec-collector \

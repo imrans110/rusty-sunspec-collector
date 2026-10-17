@@ -61,11 +61,11 @@ rusty-sunspec-collector/
   CHANGELOG.md            Keep a Changelog format
   Dockerfile              Multi-target build: builder, runtime, simulator, collector
   docker-compose.yml      Kafka + simulator + collector + Prometheus
-  Cross.toml              Maps aarch64-unknown-linux-gnu to the custom cross image
+  Cross.toml              Maps the release targets to the custom cross images
   rustfmt.toml            Formatting rules (max width 100)
   .github/
     workflows/ci.yml          fmt, clippy, build, test, cargo audit, Docker E2E
-    workflows/cross-arm64.yml aarch64 release build with cross
+    workflows/release.yml     Release archives and images (dry run unless a v* tag)
     workflows/deploy-docs.yml mdBook -> GitHub Pages
     dependabot.yml            Weekly Cargo and GitHub Actions updates
   crates/
@@ -96,11 +96,12 @@ rusty-sunspec-collector/
       src/health.rs       Heartbeats and /healthz report
       src/metrics_server.rs  Prometheus recorder, /metrics, /healthz
       src/systemd.rs      READY and watchdog notifications (Linux)
-      tests/              End-to-end, config, metrics and signal tests
+      tests/              End-to-end, CLI, config, metrics and signal tests
     sunspec-sim/          SunSpec Modbus TCP simulator (library + binary)
   docker/
-    Dockerfile.arm64      Cross-compilation image
+    Dockerfile.cross      Cross-compilation image for the release targets
     prometheus.yml        Scrape config for the compose stack
+  scripts/                Release packaging, install.sh, CHANGELOG section extraction
   docs/                   This documentation (mdBook), example config, systemd unit
 ```
 
@@ -360,8 +361,8 @@ it logged `collector stopped` and exited with code 0.
 | Security Audit | `cargo audit` |
 | Docker E2E | The compose stack end to end (see [Kafka integration tests](#kafka-integration-tests)) |
 
-Other workflows: `cross-arm64.yml` builds the aarch64 release binary (see
-[Building & Packaging](build.md#cross-compiling-for-aarch64)), and `deploy-docs.yml` publishes this
+Other workflows: `release.yml` builds and tests the release archives and images, and publishes
+them on a `v*` tag (see [Building & Packaging](build.md#release-workflow)), and `deploy-docs.yml` publishes this
 book to GitHub Pages on pushes to `main` that touch `docs/` or `README.md` (mdBook 0.4.40).
 
 The CI jobs use the latest stable Rust; the Docker images are built with Rust 1.88, so the Docker

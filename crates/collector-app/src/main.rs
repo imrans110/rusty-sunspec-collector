@@ -8,11 +8,31 @@ use tracing_subscriber::EnvFilter;
 
 use collector_app::CollectorConfig;
 
+const USAGE: &str = "\
+usage: collector-app [--config PATH]
+       collector-app --print-schema | --version | --help
+
+Settings come from the config file (--config or SUNSPEC_CONFIG) and SUNSPEC_* environment
+variables; see https://imrans110.github.io/rusty-sunspec-collector/configuration.html";
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    if env::args().any(|arg| arg == "--print-schema") {
-        println!("{}", avro_kafka::SCHEMA_JSON);
-        return Ok(());
+    for arg in env::args().skip(1) {
+        match arg.as_str() {
+            "--print-schema" => {
+                println!("{}", avro_kafka::SCHEMA_JSON);
+                return Ok(());
+            }
+            "--version" | "-V" => {
+                println!("collector-app {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            "--help" | "-h" => {
+                println!("{USAGE}");
+                return Ok(());
+            }
+            _ => {}
+        }
     }
     init_logging()?;
 

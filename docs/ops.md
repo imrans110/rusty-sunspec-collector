@@ -24,14 +24,24 @@ records are published twice, and they can fail with "database is locked".
 
 ### Docker
 
-#### Build
+#### Images
+
+Releases publish multi-arch (`linux/amd64`, `linux/arm64`) images to GHCR:
+
+```sh
+docker pull ghcr.io/imrans110/sunspec-collector:latest     # or a version, e.g. :0.2.0
+docker pull ghcr.io/imrans110/sunspec-simulator:latest
+```
+
+To build them from source instead:
 
 ```sh
 docker build -t sunspec-collector .                                 # collector (default target)
 docker build --target simulator -t sunspec-simulator .              # SunSpec device simulator
 ```
 
-The Dockerfile builds both binaries in `rust:1.88-slim-bookworm` and copies them into
+The examples below use the local tag `sunspec-collector`; substitute
+`ghcr.io/imrans110/sunspec-collector:<version>` for a published image. The Dockerfile builds both binaries in `rust:1.88-slim-bookworm` and copies them into
 `debian:bookworm-slim`. The `collector` image:
 
 - runs as the non-root user `collector`;
@@ -121,7 +131,35 @@ The collector service has no `stop_grace_period`, so `docker compose stop` allow
 The unit file is [`sunspec-collector.service`](sunspec-collector.service) and the environment
 file template is [`sunspec-collector.env`](sunspec-collector.env).
 
-#### Install
+#### From a release
+
+On x86_64 or aarch64 Linux with glibc 2.31 or newer (Debian 11+, Ubuntu 20.04+, Raspberry Pi OS
+11+):
+
+```sh
+curl -fsSL https://github.com/imrans110/rusty-sunspec-collector/releases/latest/download/install.sh | sudo sh
+sudoedit /etc/sunspec-collector.env        # devices, Kafka brokers
+sudo systemctl enable --now sunspec-collector
+```
+
+`install.sh` downloads `sunspec-collector-<version>-<target>.tar.gz` and `SHA256SUMS` from the
+release, checks the archive's checksum, and installs:
+
+| Path | Notes |
+|------|-------|
+| `/usr/local/bin/collector-app`, `/usr/local/bin/sunspec-sim` | Replaced atomically, so a running service keeps its old binary until restarted |
+| `/etc/systemd/system/sunspec-collector.service` | Replaced on upgrade; a locally edited copy is saved as `.service.bak`. Put local changes in a drop-in (`systemctl edit sunspec-collector`) |
+| `/etc/sunspec-collector.env` | Installed only if missing (mode 0600, since it may hold Kafka passwords); upgrades keep your settings |
+| `/usr/local/share/doc/sunspec-collector/` | README, CHANGELOG, licenses, `config.example.toml` and the shipped environment file |
+
+It runs `systemctl daemon-reload` but does not start or restart the service; after an upgrade, run
+`sudo systemctl restart sunspec-collector`. `SUNSPEC_VERSION=0.2.0` installs a specific release.
+To read the script first: `curl -fsSLO <url>`, read `install.sh`, then `sudo sh install.sh`.
+
+To install from a downloaded archive by hand, use the archive's files in the steps below instead
+of building.
+
+#### From source
 
 ```sh
 # 1. Build the release binary (see Building & Packaging) and install it
