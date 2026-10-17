@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The help text of `sunspec_poll_duration_seconds` now says it times the models due in one poll cycle (it has done so since polling profiles)
 
 ### Security
+- The `openssl` crate (0.10.75, with eight advisories such as CVE-2026-41678) is no longer a dependency. It came in on Linux through the Prometheus exporter's push-gateway client (`hyper-tls`, `native-tls`), which the collector never used: `/metrics` is served by the collector's own HTTP server. The exporter's HTTP listener and push gateway are now disabled, removing about 30 crates; the advisories were in APIs the collector did not call. librdkafka's TLS (`openssl-sys`) is unaffected
 - The Docker images and release binaries are built from base images pinned by digest (`rust`, `debian` and the cross-rs images), and every GitHub Actions step is pinned to a commit SHA, so a re-pushed tag upstream cannot change what a release is built with. OpenSSF Scorecard runs weekly; its badge is in the README
 
 ## [0.4.0] - 2026-10-17
