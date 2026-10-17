@@ -6,7 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-18
+
 ### Upgrade notes
+- If you run the collector with the shipped systemd unit (`install.sh` installs it), upgrade: in 0.2.0–0.4.0 its watchdog pings never reached systemd, so `WatchdogSec=30` killed and restarted the service about every 30 seconds (see Fixed). Rerun `install.sh`, then `sudo systemctl restart sunspec-collector`.
 - Records use Avro schema 2.1, which adds a `labels` map with an empty default. Readers resolve old and new records with either schema, but the schema fingerprint changes: consumers that look up the writer schema by fingerprint need the new schema (`collector-app --print-schema`) first.
 
 ### Added

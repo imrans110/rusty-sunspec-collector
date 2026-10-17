@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes go into the latest release (currently 0.4.x) and `main`. Older versions are not
+Security fixes go into the latest release (currently 0.5.x) and `main`. Older versions are not
 patched.
 
 ## Verifying releases
