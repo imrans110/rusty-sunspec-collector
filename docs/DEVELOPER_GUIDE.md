@@ -79,7 +79,8 @@ rusty-sunspec-collector/
       tests/sim_tests.rs
     sunspec-parser/       SunSpec model definitions and decoder
       models/             Official SunSpec JSON definitions (Apache-2.0)
-      src/registry.rs     MODEL_SOURCES and the definition types
+      build.rs            Embeds every models/model_<id>.json
+      src/registry.rs     Model registry and the definition types
       src/decode.rs       decode_model()
       tests/decode_tests.rs
     poller-actor/         Per-device supervisor, model-chain walk, polling
@@ -390,18 +391,18 @@ one.
 
 ## Adding a SunSpec model definition
 
-1. Copy `json/model_<id>.json` from [github.com/sunspec/models](https://github.com/sunspec/models)
-   into `crates/sunspec-parser/models/`, unmodified. The bundled files come from commit `90b4a331`
-   (recorded in `crates/sunspec-parser/models/README.md`); note it if you take a file from a newer
-   commit.
-2. Add `include_str!("../models/model_<id>.json")` to `MODEL_SOURCES` in
-   `crates/sunspec-parser/src/registry.rs`.
-3. Add the ID to the expected list in `every_bundled_model_definition_loads`
-   (`crates/sunspec-parser/tests/decode_tests.rs`). That test also fails if the JSON does not
-   parse.
-4. If the model has repeating groups, count points or float points, add a decode test for it.
+Every model in the pinned commit of [github.com/sunspec/models](https://github.com/sunspec/models)
+is already bundled. To add a model published later, or to move to a newer commit:
+
+1. Copy `json/model_<id>.json` into `crates/sunspec-parser/models/`, unmodified, and update the
+   commit recorded in `crates/sunspec-parser/models/README.md`.
+2. Nothing else needs registering: `build.rs` embeds every `model_<id>.json` in that directory.
+   `every_model_file_is_bundled` and `every_bundled_model_decodes_its_fixed_points`
+   (`crates/sunspec-parser/tests/decode_tests.rs`) check that the file parses, decodes, and has
+   unique point names.
+3. If the model has repeating groups, count points or float points, add a value test for it.
    Point types the decoder does not know are published as null.
-5. Update the model tables in `crates/sunspec-parser/models/README.md` and
+4. Update the model tables in `crates/sunspec-parser/models/README.md` and
    [Architecture](ARCHITECTURE.md#bundled-definitions), and add a CHANGELOG entry.
 
 The simulator can then serve the model: `--models 1,103,<id>`, or `<id>:<len>` when the model

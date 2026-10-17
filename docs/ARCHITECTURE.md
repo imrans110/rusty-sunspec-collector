@@ -250,23 +250,27 @@ only means the map is not at that base. A session that ends without a Modbus err
 
 ### Bundled definitions
 
-`crates/sunspec-parser/models/` holds the official SunSpec JSON model definitions from
+`crates/sunspec-parser/models/` holds every official SunSpec JSON model definition from
 [github.com/sunspec/models](https://github.com/sunspec/models) (commit `90b4a331`, Apache-2.0,
-unmodified). They are embedded with `include_str!` (the `MODEL_SOURCES` list in
-`src/registry.rs`) and parsed once on first use. Bundled models:
+unmodified): 112 models. `build.rs` embeds every `model_<id>.json` in that directory with
+`include_str!`, and `src/registry.rs` parses them once on first use. The families:
 
 | Models | Description |
 |--------|-------------|
 | 1 | Common (manufacturer, model, serial number) |
-| 101, 102, 103 | Inverter, single/split/three phase (integer + scale factor) |
-| 111, 112, 113 | Inverter, single/split/three phase (float) |
-| 120-124 | Nameplate, basic settings, status, controls, basic storage |
+| 2-19 | Aggregator, secure dataset and certificate models, network and communication interfaces |
+| 101-103, 111-113 | Inverters, single/split/three phase (integer + scale factor, and float) |
+| 120-145 | Nameplate, settings, status, controls, storage, and the IEEE 1547-2003 era control curves |
 | 160 | Multiple MPPT (repeating modules) |
-| 201-204 | AC meters |
-| 701-704 | IEEE 1547-2018 DER: AC measurements, capacity, enter service, AC controls |
-| 705-712 | IEEE 1547-2018 DER functions: volt-var, volt-watt, voltage and frequency trip curves, frequency droop, watt-var |
-| 713 | DER storage capacity (state of charge, energy available) |
-| 802 | Battery |
+| 201-204, 211-214, 220 | AC meters (integer + scale factor, float, secure readings) |
+| 302-308, 401-404, 501-502, 601 | Environmental sensors, string combiners, solar modules, tracker controller |
+| 701-715 | IEEE 1547-2018 DER: measurements, capacity, controls, curves, trip settings, storage capacity, DC measurement |
+| 801-809 | Storage: battery base, lithium-ion and flow battery banks, strings and modules |
+| 63001-64415 | SunSpec test models and the vendor models kept in the official repository |
+
+The full list with labels is in `crates/sunspec-parser/models/README.md`. A test decodes a zeroed
+register map of every bundled model and checks that each top-level point appears once and that
+point names are unique.
 
 `model_name(id)` returns the definition's name (for example `inverter_three_phase` for 103), or
 `model_<id>` for a model without a definition. Models without a definition are still polled and

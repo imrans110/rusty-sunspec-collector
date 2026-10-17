@@ -7,12 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Every official SunSpec model definition is bundled: 112 models from github.com/sunspec/models (commit `90b4a331`), up from 31. Newly decoded: network and security models (2–19), IEEE 1547-2003 era controls (125–145), float meters (211–214) and secure meter readings (220), environmental sensors (302–308), string combiners (401–404), solar modules (501–502), tracker (601), DER DC measurement and control (714–715), storage and lithium-ion/flow batteries (801, 803–809), and the test and vendor models in the official repository. The release binary grows by about 1 MB
 - Community files: `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md`, issue forms (bug report, feature request, device report) and a pull request template; a social preview image (`docs/assets/social-preview.svg` and `.png`)
 - Polling profiles: `poller.model_intervals_s` reads slow-changing models (for example common, nameplate and settings) at most once per interval instead of every cycle, and `poller.include_models` / `poller.exclude_models` choose which discovered models are polled (env `SUNSPEC_MODEL_INTERVALS_S`, `SUNSPEC_INCLUDE_MODELS`, `SUNSPEC_EXCLUDE_MODELS`). Cycles with nothing due do not contact the device and do not count as stalls
 - Per-device settings on `[[discovery.static_devices]]` entries: `poll_interval_ms`, `request_timeout_ms`, `base_address`, `max_batch_size`, `include_models`, `exclude_models` and `model_intervals_s` (merged model by model with the global intervals)
 - `SimHandle::reads_at(unit, addr)` in `sunspec-sim`, counting read requests per start address
 
 ### Changed
+- `sunspec-parser` embeds every `models/model_<id>.json` through `build.rs` instead of a hand-maintained list
 - **Breaking:** a static device listed twice (same host and unit ID) is now a config error instead of being polled once
 - `sunspec_poll_duration_seconds` is recorded only for cycles that read at least one model
 

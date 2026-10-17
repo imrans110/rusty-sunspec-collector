@@ -30,10 +30,12 @@ dropped (and counted) instead of growing the buffer without limit.
 - **Polling profiles**: read slow-changing models less often (`poller.model_intervals_s`, e.g.
   nameplate hourly), choose which models are polled (`include_models`, `exclude_models`), and
   override the poll interval, request timeout, base address and batch size per static device.
-- **Edge decoding**: bundled official SunSpec definitions for models 1, 101-103, 111-113, 120-124,
-  160, 201-204, 701-713 (IEEE 1547-2018 DER) and 802. Scale factors are applied, "not implemented"
-  values become null, strings are trimmed, and repeating groups are named `group[i].Point`
-  (nested ones too, e.g. `Crv[1].Pt[2].V`). Raw registers are kept alongside.
+- **Edge decoding**: every official SunSpec model definition is bundled (112 models from
+  github.com/sunspec/models: inverters, integer and float meters, MPPT, storage and batteries,
+  IEEE 1547-2018 DER, environmental sensors, string combiners and more). Scale factors are
+  applied, "not implemented" values become null, strings are trimmed, and repeating groups are
+  named `group[i].Point` (nested ones too, e.g. `Crv[1].Pt[2].V`). Raw registers are kept
+  alongside.
 - **Durable buffer**: SQLite in WAL mode. Samples are written in transactions of up to 256 rows.
   Retention drops the oldest rows beyond `buffer.max_rows` or older than `buffer.max_age_s`, and
   every drop is counted in a metric.
