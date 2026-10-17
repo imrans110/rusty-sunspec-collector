@@ -23,6 +23,7 @@ async fn devices_shows_the_latest_decoded_readings() {
     .await
     .unwrap();
     sim.set_point(1, 103, "W", &[4321]);
+    sim.set_point(1, 103, "St", &[4]);
     sim.set_text(1, 1, "Mn", "Rusty Sun");
     let port = free_port();
     let buffer_path = std::env::temp_dir()
@@ -73,6 +74,8 @@ async fn devices_shows_the_latest_decoded_readings() {
     assert!(readings[1]["age_s"].as_f64().unwrap() < 1.0);
     let names: Vec<&String> = readings[1]["points"].as_object().unwrap().keys().collect();
     assert_eq!(names[0], "A", "points keep definition order");
+    assert_eq!(readings[1]["points"]["St"], 4);
+    assert_eq!(readings[1]["labels"]["St"], "MPPT");
 
     let unit7 = &devices[1];
     assert_eq!(unit7["up"], false);
@@ -89,6 +92,25 @@ async fn devices_shows_the_latest_decoded_readings() {
     let (status, missing) = get_json(port, "/devices/127.0.0.1/9").await;
     assert_eq!(status, 404);
     assert_eq!(missing["error"], "unknown device 127.0.0.1/9");
+
+    let (status, index) = get_json(port, "/models").await;
+    assert_eq!(status, 200);
+    let models = index["models"].as_array().unwrap();
+    assert!(models.len() >= 112);
+    assert!(models
+        .iter()
+        .any(|model| model["id"] == 103 && model["label"] == "Inverter (Three Phase)"));
+    let (status, inverter) = get_json(port, "/models/103").await;
+    assert_eq!(status, 200);
+    let amps = inverter["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|point| point["name"] == "A")
+        .unwrap();
+    assert_eq!(amps["units"], "A");
+    let (status, _) = get_json(port, "/models/9999").await;
+    assert_eq!(status, 404);
 
     app.await.unwrap().expect("collector run");
     for suffix in ["", "-wal", "-shm"] {

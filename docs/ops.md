@@ -282,7 +282,7 @@ samples stay in the buffer and are published after the restart.
 
 ## HTTP endpoints
 
-All three endpoints are served on `metrics.port` (default 9090) on all IPv4 interfaces.
+All four endpoints are served on `metrics.port` (default 9090) on all IPv4 interfaces.
 
 ### `/metrics`
 
@@ -347,13 +347,26 @@ curl -s localhost:9090/devices/192.168.1.50/126    # one device (404 if it is no
 | `up`, `last_success_ms`, `restarts` | The same state as `sunspec_device_up`, `sunspec_device_last_success_timestamp_seconds` and `sunspec_poller_restarts_total`. `last_success_ms` is `null` before the first successful read. |
 | `base_address`, `models` | Where the `SunS` marker was found and the model chain, from the latest discovery; `null` and empty until a session has discovered the device. |
 | `polled_models` | The models the [polling profile](configuration.md#polling-profiles) selects. |
-| `readings` | The latest successful read of each polled model, in device order: decoded points in definition order (scale factors applied, "not implemented" values `null`), and how old the read is. A model on a slow interval shows its last read until the next one. |
+| `readings` | The latest successful read of each polled model, in device order: decoded points in definition order (scale factors applied, "not implemented" values `null`), `labels` (enum values and set bitfield bits by name, as in records), and how old the read is. A model on a slow interval shows its last read until the next one. |
 
 Only the latest reading of each model is kept, so memory does not grow. A device that has never
 answered is listed with empty `models` and `readings`.
 
 The endpoint exposes device data (readings, models, addresses) to anyone who can reach
 `metrics.port`, like `/metrics`. Keep the port on a management network or behind a firewall.
+
+### `/models`
+
+The bundled SunSpec model definitions, for describing what records and `/devices` contain:
+
+```sh
+curl -s localhost:9090/models          # {"models": [{"id": 1, "name": "common", "label": "Common"}, ...]}
+curl -s localhost:9090/models/103      # one model: every point with type, units, label, description, symbols
+```
+
+Point names match records, with `[*]` for a repeating group's index (`module[*].DCA`). An unknown
+ID returns 404. `collector-app --print-models` prints the same metadata for every model, for
+consumers that load it once.
 
 ---
 
@@ -766,6 +779,13 @@ This release contains breaking changes. Read all of this section before upgradin
 `collector-app --print-schema` prints the v2 schema; Rust consumers can use `avro_kafka::decode`.
 Consumers must be updated before or together with the collector. To avoid mixing formats on one
 topic, consider publishing v2 to a new topic (`kafka.topic`).
+
+### Schema 2.1: `labels`
+
+Schema 2.1 adds a `labels` map (enum values and set bitfield bits by name) with an empty default.
+Avro readers resolve old and new records with either schema, but the schema's fingerprint
+changes. Consumers that look up the writer schema by fingerprint need the 2.1 schema
+(`collector-app --print-schema`) before they read records from this version.
 
 Rows buffered by the previous version are published in the v2 format after the upgrade, but with
 an empty `points` map and the old model names. To avoid this, let the old version drain its buffer

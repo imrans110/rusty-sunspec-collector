@@ -172,6 +172,16 @@ fn to_value(sample: &Sample) -> Value {
         ),
         ("points".into(), Value::Map(points)),
         (
+            "labels".into(),
+            Value::Map(
+                sample
+                    .labels
+                    .iter()
+                    .map(|(name, label)| (name.clone(), Value::String(label.clone())))
+                    .collect(),
+            ),
+        ),
+        (
             "registers".into(),
             Value::Array(
                 sample
@@ -221,6 +231,14 @@ fn from_value(value: Value) -> Result<Sample, PublishError> {
         })
         .collect::<Result<_, _>>()?;
     points.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut labels: Vec<(String, String)> = match take("labels")? {
+        Value::Map(labels) => labels
+            .into_iter()
+            .map(|(name, label)| Ok((name, string(label)?)))
+            .collect::<Result<_, PublishError>>()?,
+        _ => return Err(PublishError::Schema("labels")),
+    };
+    labels.sort_by(|a, b| a.0.cmp(&b.0));
     let Value::Array(registers) = take("registers")? else {
         return Err(PublishError::Schema("registers"));
     };
@@ -237,6 +255,7 @@ fn from_value(value: Value) -> Result<Sample, PublishError> {
         registers,
         collected_at_ms,
         points,
+        labels,
     })
 }
 

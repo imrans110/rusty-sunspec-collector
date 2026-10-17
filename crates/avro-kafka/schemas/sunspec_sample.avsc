@@ -29,6 +29,12 @@
       "doc": "Decoded points by SunSpec name: scale factors applied (double), integers for enums, bitfields and unscaled counts (long), strings trimmed, null when the device marks a point as not implemented. Repeating groups are named group[i].Point. Empty for models without a bundled definition."
     },
     {
+      "name": "labels",
+      "type": { "type": "map", "values": "string" },
+      "default": {},
+      "doc": "Names for enum and bitfield points, by point name: the symbol of an enum value (e.g. St: MPPT), or the names of a bitfield's set bits, comma-separated, with bit<n> for unnamed bits and an empty string when none is set (e.g. Evt1: GROUND_FAULT,AC_DISCONNECT). Points whose value has no name, or is not implemented, have no entry. Added in schema 2.1 with an empty default."
+    },
+    {
       "name": "registers",
       "type": { "type": "array", "items": "int" },
       "doc": "Raw registers, including the two header registers."

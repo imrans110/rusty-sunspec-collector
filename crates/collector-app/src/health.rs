@@ -68,6 +68,9 @@ pub struct ReadingView {
     /// Decoded points in definition order.
     #[serde(with = "types::ordered_points")]
     pub points: Vec<(String, PointValue)>,
+    /// Names of enum values and set bitfield bits, by point.
+    #[serde(with = "types::ordered_points")]
+    pub labels: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -139,6 +142,7 @@ fn device_view(identity: &DeviceIdentity, health: &DeviceHealth, now: u64) -> De
             collected_at_ms: sample.collected_at_ms,
             age_s: now.saturating_sub(sample.collected_at_ms) as f64 / 1000.0,
             points: sample.points,
+            labels: sample.labels,
         })
         .collect();
     DeviceView {

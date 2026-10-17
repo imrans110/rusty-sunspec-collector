@@ -13,15 +13,64 @@ use crate::registry::{model_definition, Count, GroupDef, PointDef, PointType, Sc
 /// - Repeating groups are named `group[i].Point`; fixed nested groups `group.Point`.
 /// - The model header (`ID`, `L`), scale factors and padding are omitted.
 pub fn decode_model(model_id: u16, registers: &[u16]) -> Option<Vec<(String, PointValue)>> {
+    decode_model_labeled(model_id, registers).map(|decoded| decoded.points)
+}
+
+/// A decoded model: its points, and names for its enum and bitfield values.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DecodedModel {
+    /// As returned by [`decode_model`].
+    pub points: Vec<(String, PointValue)>,
+    /// For each implemented enum point, the symbol name of its value (when the
+    /// definition names it); for each implemented bitfield, the names of the set bits,
+    /// comma-separated, with `bit<n>` for unnamed bits, and an empty string when no bit
+    /// is set. In definition order.
+    pub labels: Vec<(String, String)>,
+}
+
+/// [`decode_model`] plus enum and bitfield names, in one pass.
+pub fn decode_model_labeled(model_id: u16, registers: &[u16]) -> Option<DecodedModel> {
     let model = model_definition(model_id)?;
     let mut decoder = Decoder {
         registers,
         pos: 0,
         scopes: Vec::new(),
         out: Vec::new(),
+        labels: Vec::new(),
     };
     decoder.group(&model.group, "", true);
-    Some(decoder.out)
+    Some(DecodedModel {
+        points: decoder.out,
+        labels: decoder.labels,
+    })
+}
+
+/// The name of an enum value, or the names of a bitfield's set bits.
+fn label(point: &PointDef, value: &PointValue) -> Option<String> {
+    let PointValue::Int(value) = *value else {
+        return None;
+    };
+    match point.kind {
+        PointType::Enum16 | PointType::Enum32 => point
+            .symbols
+            .iter()
+            .find(|symbol| symbol.value == value)
+            .map(|symbol| symbol.name.clone()),
+        PointType::Bitfield16 | PointType::Bitfield32 => {
+            let names: Vec<String> = (0..64)
+                .filter(|bit| value >> bit & 1 == 1)
+                .map(|bit| {
+                    point
+                        .symbols
+                        .iter()
+                        .find(|symbol| symbol.value == bit)
+                        .map_or_else(|| format!("bit{bit}"), |symbol| symbol.name.clone())
+                })
+                .collect();
+            Some(names.join(","))
+        }
+        _ => None,
+    }
 }
 
 struct Decoder<'a> {
@@ -30,6 +79,7 @@ struct Decoder<'a> {
     /// Values visible from the group being decoded, innermost group last.
     scopes: Vec<Scope<'a>>,
     out: Vec<(String, PointValue)>,
+    labels: Vec<(String, String)>,
 }
 
 /// Points of one group instance that other points or groups refer to by name.
@@ -75,7 +125,11 @@ impl<'a> Decoder<'a> {
                 || (top_level && (point.name == "ID" || point.name == "L"));
             if !skip {
                 let value = self.value(point, raw);
-                self.out.push((format!("{prefix}{}", point.name), value));
+                let name = format!("{prefix}{}", point.name);
+                if let Some(label) = label(point, &value) {
+                    self.labels.push((name.clone(), label));
+                }
+                self.out.push((name, value));
             }
         }
 

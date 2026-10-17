@@ -19,7 +19,27 @@ fn sample(unit_id: u8) -> Sample {
             ("St".to_string(), PointValue::Int(4)),
             ("VA".to_string(), PointValue::Null),
         ],
+        labels: vec![
+            ("Evt1".to_string(), String::new()),
+            ("St".to_string(), "MPPT".to_string()),
+        ],
     }
+}
+
+/// Schema 2.1 added `labels` with an empty default, so readers resolving 2.0 data with
+/// the 2.1 schema (and the reverse) still work.
+#[test]
+fn labels_were_added_with_a_default() {
+    let schema: serde_json::Value =
+        serde_json::from_str(avro_kafka::SCHEMA_JSON).expect("schema is JSON");
+    let labels = schema["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "labels")
+        .expect("labels field");
+    assert_eq!(labels["default"], serde_json::json!({}));
+    assert_eq!(labels["type"]["values"], "string");
 }
 
 #[test]

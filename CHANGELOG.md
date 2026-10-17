@@ -6,7 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Upgrade notes
+- Records use Avro schema 2.1, which adds a `labels` map with an empty default. Readers resolve old and new records with either schema, but the schema fingerprint changes: consumers that look up the writer schema by fingerprint need the new schema (`collector-app --print-schema`) first.
+
 ### Added
+- Enum and bitfield names: records carry `labels`, e.g. `St: MPPT` and `Evt1: GROUND_FAULT,AC_DISCONNECT` (set bits comma-separated, `bit<n>` for unnamed bits, empty when no bit is set), decoded with the symbol tables in the bundled definitions. `/devices` shows them too
+- Model catalog: `collector-app --print-models` prints, and `GET /models` and `/models/{id}` serve, every bundled model's points with type, units, label, description and enum/bitfield symbols; point names match records (`module[*].DCA` for repeating groups)
 - `/devices` and `/devices/{host}/{unit}` on the metrics port: each device's state, discovered and polled models, and the latest decoded reading of each polled model, as JSON. Only the latest reading per model is kept
 - Serial devices through serial-to-Ethernet converters: `modbus.framing = "rtu"` (also `SUNSPEC_MODBUS_FRAMING` and a per-device `framing`) speaks Modbus RTU frames over TCP. Units on the same converter share one connection, so their requests never overlap on the RS-485 bus; units sharing a converter must use the same `request_timeout_ms` and `max_batch_size`. `--probe` works through converters too
 - `sunspec-sim --rtu` and `sunspec_sim::start_rtu_over_tcp` simulate a converter (RTU framing with CRC; absent units stay silent); `ModbusClient::new` creates a client that connects on its first read

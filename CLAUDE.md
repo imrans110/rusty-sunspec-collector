@@ -136,8 +136,14 @@ the image start reading another file. `audit.yml` audits `main` daily.
 - **Metrics naming**: `sunspec_*` prefix, counters end in `_total`, durations are `_seconds`
   histograms; per-device metrics use `device="host/unit"`. Add help text in
   `collector-app/src/metrics_server.rs`.
-- **Record format** is a public contract (schema `com.rusty.sunspec.v2.SunspecSample`): changes to
-  the `.avsc`, key or headers are breaking and must be noted in `CHANGELOG.md`.
+- **Record format** is a public contract (schema `com.rusty.sunspec.v2.SunspecSample`, version
+  2.1): changes to the `.avsc`, key or headers must be noted in `CHANGELOG.md`. Fields that old
+  readers can resolve (a new field with a default, like 2.1's `labels`) stay in `v2`; anything
+  else needs `v3` and a breaking entry. Any schema change changes the fingerprint.
+- **Labels and catalog**: `sunspec_parser::decode_model_labeled` returns points plus `labels`
+  (enum symbol names, set bitfield bits as `A,B` or `bit<n>`); `Sample.labels` carries them to
+  records and `/devices`. `catalog()` / `model_info(id)` serve `--print-models`, `/models` and
+  `/models/{id}` (point names with `[*]` for repeating groups).
 
 ## Docker
 

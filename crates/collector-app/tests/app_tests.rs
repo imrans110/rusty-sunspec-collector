@@ -148,6 +148,7 @@ async fn uplink_drains_a_backlog_without_pausing_between_batches() {
         registers: vec![0; 52],
         collected_at_ms: 0,
         points: Vec::new(),
+        labels: Vec::new(),
     };
     let payload = serde_json::to_vec(&sample).unwrap();
     {
@@ -195,6 +196,8 @@ async fn publishes_decoded_records_keyed_by_device() {
     sim.set_text(1, 1, "Mn", "Rusty SunSpec");
     sim.set_point(1, 103, "W", &[4321]);
     sim.set_point(1, 103, "W_SF", &[(-1i16) as u16]);
+    sim.set_point(1, 103, "St", &[7]);
+    sim.set_point(1, 103, "Evt1", &[0, 0b11]);
     let path = temp_db_path("records");
     let mut config = config(&sim, &path);
     config.discovery.static_devices = static_devices(&[1, 2]);
@@ -243,6 +246,24 @@ async fn publishes_decoded_records_keyed_by_device() {
         .find(|sample| sample.model_id == 103)
         .unwrap();
     assert_eq!(inverter.model_name, "inverter_three_phase");
+
+    let unit1_inverter = samples
+        .iter()
+        .find(|sample| sample.device.unit_id == 1 && sample.model_id == 103)
+        .unwrap();
+    let label = |name: &str| {
+        unit1_inverter
+            .labels
+            .iter()
+            .find(|(point, _)| point == name)
+            .map(|(_, label)| label.as_str())
+    };
+    assert_eq!(
+        label("St"),
+        Some("FAULT"),
+        "enum names travel in the record"
+    );
+    assert_eq!(label("Evt1"), Some("GROUND_FAULT,DC_OVER_VOLT"));
     cleanup(&path);
 }
 

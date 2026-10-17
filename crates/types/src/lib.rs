@@ -41,6 +41,10 @@ pub struct Sample {
     /// Decoded points in definition order; empty for models without a definition.
     #[serde(default)]
     pub points: Vec<(String, PointValue)>,
+    /// Names of enum values and of set bitfield bits, by point name (see
+    /// `sunspec_parser::DecodedModel::labels`).
+    #[serde(default)]
+    pub labels: Vec<(String, String)>,
 }
 
 /// Format version written by `collector-app --probe`.
@@ -109,19 +113,18 @@ mod hex_registers {
     }
 }
 
-/// Points as a JSON object that keeps definition order; use with
+/// Name/value pairs (points, labels) as a JSON object that keeps their order; use with
 /// `#[serde(with = "types::ordered_points")]`.
 pub mod ordered_points {
     use std::fmt;
+    use std::marker::PhantomData;
 
     use serde::de::{MapAccess, Visitor};
     use serde::ser::SerializeMap;
-    use serde::{Deserializer, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    use crate::PointValue;
-
-    pub fn serialize<S: Serializer>(
-        points: &[(String, PointValue)],
+    pub fn serialize<S: Serializer, V: Serialize>(
+        points: &[(String, V)],
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(points.len()))?;
@@ -131,16 +134,16 @@ pub mod ordered_points {
         map.end()
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
+    pub fn deserialize<'de, D: Deserializer<'de>, V: Deserialize<'de>>(
         deserializer: D,
-    ) -> Result<Vec<(String, PointValue)>, D::Error> {
-        struct Points;
+    ) -> Result<Vec<(String, V)>, D::Error> {
+        struct Points<V>(PhantomData<V>);
 
-        impl<'de> Visitor<'de> for Points {
-            type Value = Vec<(String, PointValue)>;
+        impl<'de, V: Deserialize<'de>> Visitor<'de> for Points<V> {
+            type Value = Vec<(String, V)>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a map of point names to values")
+                formatter.write_str("a map of names to values")
             }
 
             fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
@@ -152,6 +155,6 @@ pub mod ordered_points {
             }
         }
 
-        deserializer.deserialize_map(Points)
+        deserializer.deserialize_map(Points(PhantomData))
     }
 }

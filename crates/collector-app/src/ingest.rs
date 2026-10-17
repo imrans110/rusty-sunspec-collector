@@ -98,6 +98,7 @@ mod tests {
             registers: vec![n],
             collected_at_ms: u64::from(n),
             points: Vec::new(),
+            labels: Vec::new(),
         }
     }
 

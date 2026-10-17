@@ -153,9 +153,13 @@ over time.
 - **Schema** `com.rusty.sunspec.v2.SunspecSample`: `device_key`, `ip`, `unit_id`, `model_id`,
   `model_name` (official SunSpec name such as `inverter_three_phase`, or `model_<id>`), `start`
   (register address of the model header), `collected_at_ms` (timestamp-millis), `points` (map of
-  point name to null, double, long or string) and `registers` (raw, including the two header
-  registers).
-- Models without a bundled definition have an empty `points` map and raw `registers` only.
+  point name to null, double, long or string), `labels` (enum values and set bitfield bits by
+  name, e.g. `St: MPPT`, `Evt1: GROUND_FAULT,AC_DISCONNECT`; added in schema 2.1 with an empty
+  default) and `registers` (raw, including the two header registers).
+- Models without a bundled definition have empty `points` and `labels` maps and raw `registers`
+  only.
+- Units, labels and descriptions of every point are in the model catalog:
+  `collector-app --print-models`, or `GET /models` and `/models/<id>` on the metrics port.
 
 The schema is in [`crates/avro-kafka/schemas/sunspec_sample.avsc`](crates/avro-kafka/schemas/sunspec_sample.avsc);
 `collector-app --print-schema` prints it. Rust consumers can use `avro_kafka::decode`.
@@ -205,14 +209,16 @@ The full reference is in [docs/configuration.md](docs/configuration.md). Starter
 
 ## Observability
 
-The collector serves three endpoints on `metrics.port` (default 9090). If the port cannot be bound,
+The collector serves four endpoints on `metrics.port` (default 9090). If the port cannot be bound,
 the collector stops at startup with `bind metrics port <port>`.
 
 - `/metrics`: Prometheus text format. `*_seconds` metrics are histograms.
 - `/healthz`: 200 while ingest and the uplink have checked in within the last 120 s, otherwise
   503, with a JSON body. A device being offline does not make the collector unhealthy.
-- `/devices`: every device's state, discovered models and latest decoded readings, as JSON
-  (`/devices/<host>/<unit>` for one device). It exposes device data, so keep the port on a
+- `/devices`: every device's state, discovered models and latest decoded readings and labels, as
+  JSON (`/devices/<host>/<unit>` for one device).
+- `/models`: the bundled SunSpec models; `/models/<id>` gives one model's points with labels,
+  units, descriptions and enum and bitfield symbols. It exposes device data, so keep the port on a
   management network.
 
 Metrics worth alerting on (per-device metrics have a `device="host/unit"` label):
@@ -332,12 +338,11 @@ When to use which:
 - Kafka authentication is limited to SASL PLAIN and SCRAM (no Kerberos or OAuth), and rotated
   certificates are picked up on restart.
 - No Schema Registry integration; records use fingerprint-based single-object encoding instead.
-- Point metadata (units, labels) is not in the payload; consumers look it up by model and point
-  name in the bundled definitions.
+- Units and descriptions are not in each record; they are in the model catalog
+  (`--print-models`, `/models`), keyed by model ID and point name.
 - No configuration reload (SIGHUP).
 - Serial (RS-485) devices are reached through a serial-to-Ethernet converter (`framing = "rtu"`);
   native serial ports on the gateway are not supported yet.
-- Enum and bitfield points are published as integers, not expanded to names.
 - Delivery is at-least-once, so duplicates are possible after a crash.
 
 ## Status

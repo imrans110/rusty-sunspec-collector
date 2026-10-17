@@ -9,7 +9,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use metrics::{counter, gauge, histogram};
 use modbus_client::{ClientConfig, ClientError, ModbusClient};
-use sunspec_parser::{decode_model, model_name, ModelDefinition, SUNSPEC_END_ID, SUNSPEC_ID};
+use sunspec_parser::{
+    decode_model_labeled, model_name, ModelDefinition, SUNSPEC_END_ID, SUNSPEC_ID,
+};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendTimeoutError;
 use tokio::sync::{mpsc, watch};
@@ -471,7 +473,7 @@ async fn poll_device(
                     next_due[index] = schedule.interval(model.id).map(|every| tick + every);
                     counter!("sunspec_poll_success_total", "device" => device.clone()).increment(1);
                     // Decode at the edge so consumers get scaled, named points.
-                    let points = decode_model(model.id, &registers).unwrap_or_default();
+                    let decoded = decode_model_labeled(model.id, &registers).unwrap_or_default();
                     let sample = Sample {
                         device: identity.clone(),
                         model_id: model.id,
@@ -479,7 +481,8 @@ async fn poll_device(
                         start: model.start,
                         registers,
                         collected_at_ms: unix_ms(),
-                        points,
+                        points: decoded.points,
+                        labels: decoded.labels,
                     };
                     health.record_reading(&sample);
                     // Never block polling for long on a full channel; drop and count.

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Official SunSpec model definitions (github.com/sunspec/models, Apache-2.0): every
 /// `models/model_<id>.json`, embedded by `build.rs`.
@@ -16,6 +16,10 @@ pub struct ModelDef {
 #[derive(Debug, Clone, Deserialize)]
 pub struct GroupDef {
     pub name: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub desc: Option<String>,
     /// Repetitions: a fixed number (0 = repeat to fill the model) or a point holding it.
     #[serde(default)]
     pub count: Count,
@@ -49,6 +53,24 @@ pub struct PointDef {
     pub sf: Option<ScaleFactor>,
     #[serde(default)]
     pub units: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub desc: Option<String>,
+    /// Names for enum values, or for bitfield bit positions.
+    #[serde(default)]
+    pub symbols: Vec<SymbolDef>,
+}
+
+/// One named value of an enum point, or one named bit (by position) of a bitfield.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SymbolDef {
+    pub name: String,
+    pub value: i64,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub desc: Option<String>,
 }
 
 fn one() -> u16 {
@@ -63,7 +85,7 @@ pub enum ScaleFactor {
     Point(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PointType {
     Int16,
