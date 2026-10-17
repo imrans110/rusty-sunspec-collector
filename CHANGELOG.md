@@ -6,7 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Upgrade notes
+- Kafka consumers must switch to the v2 record format (one Avro single-object record per sample, keyed by device); see `crates/avro-kafka/schemas/sunspec_sample.avsc` and `docs/ops.md`. Rows buffered by an older version are published with empty `points`, so let the old version drain its buffer before upgrading if possible.
+- Docker: the default buffer file is now `/app/data/sunspec-buffer.sqlite` (previously `/app/data/buffer.sqlite` via the image's `SUNSPEC_BUFFER_PATH`). To keep using an existing volume's unsent rows, set `SUNSPEC_BUFFER_PATH=/app/data/buffer.sqlite` (or `buffer.path`).
+- Config is strict and several metric names changed; see `docs/ops.md` for the rename table and `docs/configuration.md` for deprecated keys.
+
 ### Added
+- `vendored-openssl` cargo feature (collector-app, avro-kafka): builds OpenSSL from source and links it statically; used by the aarch64 cross build so the binary does not depend on the target's OpenSSL
+- Docs: `docs/build.md` (building, Docker images, cross-compiling) and `docs/buffer_maintenance.md` (buffer semantics, retention, sizing, inspection); the October 2026 audit is recorded in `docs/CODE_REVIEW.md`
 - CI `Docker E2E` job: builds the images, runs Kafka + simulator + collector with docker compose, waits for `/healthz`, checks records are keyed per device, decodes the published records with the Rust consumer test, and verifies a clean SIGTERM stop
 - `Cross-compile (aarch64)` workflow building the ARM64 release binary with `cross`
 - `simulator` Docker target and compose service (two units behind one gateway), so `docker compose up --build` produces data without hardware
@@ -39,6 +46,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `CONTRIBUTING.md`
 
 ### Fixed
+- `sunspec_device_up` is published as 0 as soon as a device's poller starts, so devices that never answer are visible (previously they had no series)
+- `sunspec_poll_errors_total` also counts connect failures and Modbus errors during model discovery at session start
+- A metrics port that cannot be bound now stops the collector at startup (`bind metrics port <port>`) instead of running without `/metrics` and `/healthz`
+- The Docker image no longer sets `SUNSPEC_BUFFER_PATH` (which overrode `buffer.path` from a config file); the collector runs in `/app/data`, so the default buffer is `/app/data/sunspec-buffer.sqlite`. The `HEALTHCHECK` follows `SUNSPEC_METRICS_PORT`
+- The example env file had an inline comment that systemd and `docker --env-file` pass through as part of the value, which strict config rejected; tests now load the shipped example config and env file
 - docker-compose used `bitnami/kafka:3.7`, which no longer exists on Docker Hub; it now uses the official `apache/kafka:3.9.1` (KRaft) with a host listener on `localhost:29092`
 - Uplink throughput was capped at `batch_size / drain_interval` (200 samples/s by default) because it paused between every batch; it now drains back to back while a backlog remains
 - Gateways: devices are keyed by host and unit ID, so every unit behind one IP is polled (previously only the last one)
@@ -57,6 +69,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed unused `retry_count` column from buffer schema
 
 ### Changed
+- Config validation rejects `kafka.acks` `0`/`1` while `kafka.enable_idempotence` is true (librdkafka refused to start) and `modbus.max_batch_size` above 125 (previously clamped silently)
+- `modbus.timeout_ms` / `SUNSPEC_MODBUS_TIMEOUT_MS` are deprecated and ignored with a warning: device sessions always used `poller.request_timeout_ms`, so the setting had no effect
+- README and docs rewritten against the code: removed claims that were not true ("zero data loss", "90%+" overhead reduction, "zombie poller detection", graceful SIGTERM before it existed) and dead links
 - CI runs on every push to main and every pull request (no path filters), so its checks can be required for merging
 - The systemd unit runs as a dynamic unprivileged user with `StateDirectory=sunspec-collector` (it ran as root), allows 30 s for the graceful stop, and adds further sandboxing
 - Docker `HEALTHCHECK` uses `/healthz`; images run as a non-root user; `docker/Dockerfile.arm64` drops the unused `librdkafka-dev` and `libsqlite3-dev` packages

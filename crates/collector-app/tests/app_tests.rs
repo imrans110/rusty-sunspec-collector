@@ -21,6 +21,8 @@ fn config(sim: &SimHandle, buffer_path: &str) -> CollectorConfig {
     config.buffer_path = buffer_path.to_string();
     config.buffer_drain_interval_ms = 3_600_000;
     config.shutdown_drain_timeout_ms = 0;
+    // Each test gets a free port for /metrics and /healthz.
+    config.metrics_port = 0;
     config
 }
 
@@ -163,6 +165,7 @@ async fn uplink_drains_a_backlog_without_pausing_between_batches() {
     config.buffer_batch_size = 100;
     config.buffer_drain_interval_ms = 500;
     config.shutdown_drain_timeout_ms = 0;
+    config.metrics_port = 0;
 
     // With the old fixed pause between batches this drained 100 rows per 500 ms,
     // i.e. about 400 rows in 2 s.
@@ -240,6 +243,23 @@ async fn publishes_decoded_records_keyed_by_device() {
         .find(|sample| sample.model_id == 103)
         .unwrap();
     assert_eq!(inverter.model_name, "inverter_three_phase");
+    cleanup(&path);
+}
+
+#[tokio::test]
+async fn a_taken_metrics_port_fails_startup() {
+    let taken = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+    let path = temp_db_path("port");
+    let mut config = CollectorConfig::default();
+    config.discovery.subnet = "127.0.0.1/32".to_string();
+    config.discovery.port = 9;
+    config.buffer_path = path.clone();
+    config.metrics_port = taken.local_addr().unwrap().port();
+
+    let result = collector_app::run(config, None, tokio::time::sleep(Duration::from_secs(5))).await;
+
+    let err = result.expect_err("port already in use");
+    assert!(format!("{err:#}").contains("bind metrics port"), "{err:#}");
     cleanup(&path);
 }
 

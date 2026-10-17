@@ -1,12 +1,74 @@
 # Code Review & Audit Report
 
-> **Date**: February 2026
-> **Scope**: Full end-to-end review of all source code, configuration, infrastructure, CI/CD, and documentation.
-> **Status**: All critical, high, and medium findings have been **resolved**. Remaining items are future enhancements.
+This page records two reviews. The **October 2026 audit** is current. The **February 2026
+review** below it is kept for history. Its fixes were committed without CI being green, and
+`main` did not compile again until #9, so treat its "resolved" status with care.
 
 ---
 
-## Executive Summary
+## October 2026 audit
+
+> **Scope:** the whole system: code, data path, data contract, configuration, observability,
+> deployment, CI and docs.
+> **Method:** code reading, plus running the collector against a SunSpec Modbus simulator to
+> reproduce each failure. Every fix comes with a test that reproduces the original problem.
+> **Status:** all 17 findings resolved in #9–#17.
+
+Before the audit, `main` did not compile, and CI had been red since February 2026 without
+anyone noticing (there was no branch protection). #9 restored the build and fixed the first
+runtime bugs. #10 cleared all `cargo audit` vulnerabilities. The 8 Dependabot PRs were then
+merged. The 17 findings below were fixed in #11–#17.
+
+### Critical: blocked the core use case
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | With any broker configured, Kafka publishing failed at startup: the default `zstd` compression wasn't compiled into librdkafka. | #11: rdkafka `zstd` feature, plus a regression test that creates a producer for every codec |
+| 2 | Gateways: pollers were keyed by IP, so only the last unit ID behind a host was polled. | #12: devices keyed by host and unit ID, plus an end-to-end gateway test |
+| 3 | Discovery read a fixed 200-register window and silently dropped every model past it (status, controls, MPPT). | #12: walk the model chain one header at a time, probing bases 40000, 0 and 50000 |
+| 4 | A device that was offline at startup was never polled. | #12: per-device supervision with backoff, plus subnet rescans |
+| 5 | SIGTERM (systemd/Docker stop) killed the process with no graceful shutdown. | #11: SIGTERM handled, plus a process-level test |
+
+### High: data path and durability
+
+| # | Finding | Fix |
+|---|---|---|
+| 6 | Upload throughput was capped at `batch_size / drain_interval` (200 samples/s). | #13: drain back to back while a backlog exists |
+| 7 | The buffer was unbounded, so samples were lost once the disk filled; queued samples were lost on stop; every sample cost one fsync. | #13: `max_rows`/`max_age_s` retention, shutdown flush with a bounded final drain, batched transactions |
+| 8 | Only raw registers were shipped. Scale factors, sentinels and point names were left to every consumer; the parser's scaling code was unused. | #14: edge decoding with the official SunSpec definitions |
+| 9 | Each Kafka message was an Avro container mixing devices, with no key, the schema embedded every time, and duplicates after a crash. | #14: one keyed single-object record per sample; only acknowledged rows are deleted |
+
+### Medium: operations and config
+
+| # | Finding | Fix |
+|---|---|---|
+| 10 | Dropped Modbus connections were never re-established, so data was lost until the poller gave up. | #11: lazy reconnect on transport errors and timeouts; Modbus exceptions keep the connection |
+| 11 | Config errors were silently ignored: unparsable env values, a bad unit ID became 1, unknown keys. | #15: strict config (`deny_unknown_fields`, errors name the variable); #17 deprecates the ineffective `modbus.timeout_ms` |
+| 12 | About 430k INFO lines a day per device, and ANSI colour codes in journald/Docker logs. | #12 and #15: per-cycle logs at debug, colours only on a terminal, JSON format option |
+| 13 | Metrics couldn't show device health: a high-cardinality `batch_size` label, summaries instead of histograms, no per-device liveness, and no real stall detection. | #12 and #15: `sunspec_*` metrics with per-device gauges, histograms, `/healthz`, a health-gated watchdog, stall detection |
+| 14 | docker-compose couldn't pull its Kafka image and had no device to poll; the systemd unit ran as root; images were never built in CI; unused arm64 packages. | #16: official Kafka image, simulator service, DynamicUser unit, Docker E2E and cross-compile CI |
+
+### Quality and process
+
+| # | Finding | Fix |
+|---|---|---|
+| 15 | 13 tests in total; discovery, the poller and the orchestration had none; the integration tests passed without doing anything. | #11–#16: the `sunspec-sim` crate and simulator-backed unit, integration and end-to-end tests (56 plus 2 broker tests run in CI) |
+| 16 | No branch protection, so a broken `main` went unnoticed for 8 months. | Branch protection requires Check & Lint, Test, Security Audit and Docker E2E |
+| 17 | Docs overclaimed ("zero data loss", "90%+", "zombie poller detection", graceful SIGTERM) and linked to missing pages. | #17: docs rewritten against the code; `build.md` and `buffer_maintenance.md` added |
+
+### Remaining limitations
+
+- Kafka TLS/SASL settings are not yet exposed in config (librdkafka is built with SSL).
+- There's no Schema Registry integration. Records carry the schema's fingerprint instead.
+- Delivery is at-least-once. Consumers should deduplicate on `(device_key, model_id, collected_at_ms)`.
+- There's no config reload and no per-device polling profiles.
+
+---
+
+## February 2026 review (historical)
+
+
+### Executive Summary
 
 Rusty SunSpec Collector is a well-architected Rust workspace with clean domain boundaries across 8 crates. The core design — actor-based polling, durable SQLite buffering, Avro/Kafka uplink — is sound.
 
@@ -14,21 +76,21 @@ The initial review uncovered **3 compilation/runtime bugs**, **8 high-severity i
 
 ---
 
-## 1. Critical Bugs — RESOLVED
+### 1. Critical Bugs — RESOLVED
 
-### 1.1 `config.rs` — Non-existent field `discovery_unit_ids` ✅
+#### 1.1 `config.rs` — Non-existent field `discovery_unit_ids` ✅
 
 **Problem**: The `Default` impl, `apply_env_overrides`, and `apply_file_config` all referenced a `discovery_unit_ids` field that did not exist on `CollectorConfig`. Additionally, `parse_unit_id_list()` was called but never defined, and `FileDiscoveryConfig` was missing a `unit_ids` field.
 
 **Fix**: Added `discovery_unit_ids: Vec<u8>` to the struct, added `unit_ids` to `FileDiscoveryConfig`, and implemented the missing `parse_unit_id_list()` function.
 
-### 1.2 `config.rs` — Duplicate fields in `Default` impl ✅
+#### 1.2 `config.rs` — Duplicate fields in `Default` impl ✅
 
 **Problem**: `kafka_topic` and `kafka_enable_idempotence` were set twice in the struct literal.
 
 **Fix**: Removed the duplicate lines.
 
-### 1.3 `main.rs` — Prometheus recorder installed twice ✅
+#### 1.3 `main.rs` — Prometheus recorder installed twice ✅
 
 **Problem**: `PrometheusBuilder::new().install_recorder()` was called twice. The `metrics` crate only allows a single global recorder, so the second call would crash the app on startup.
 
@@ -36,115 +98,115 @@ The initial review uncovered **3 compilation/runtime bugs**, **8 high-severity i
 
 ---
 
-## 2. High-Severity Issues — RESOLVED
+### 2. High-Severity Issues — RESOLVED
 
-### 2.1 No CI/CD for build, test, or lint ✅
+#### 2.1 No CI/CD for build, test, or lint ✅
 
 **Fix**: Added `.github/workflows/ci.yml` with `cargo fmt --check`, `cargo clippy`, `cargo build`, and `cargo test` jobs.
 
-### 2.2 Docker container runs as root ✅
+#### 2.2 Docker container runs as root ✅
 
 **Fix**: Added non-root `collector` user/group in Dockerfile. Process now runs as `USER collector:collector`.
 
-### 2.3 No Docker `HEALTHCHECK` ✅
+#### 2.3 No Docker `HEALTHCHECK` ✅
 
 **Fix**: Added `HEALTHCHECK` instruction that curls the `/metrics` endpoint.
 
-### 2.4 Outdated base images ✅
+#### 2.4 Outdated base images ✅
 
 **Fix**: Migrated from `bullseye` (Debian 11) to `bookworm` (Debian 12) for both builder and runtime stages. Updated `libssl1.1` to `libssl3`.
 
-### 2.5 `.dockerignore` excludes `Cargo.lock` ✅
+#### 2.5 `.dockerignore` excludes `Cargo.lock` ✅
 
 **Fix**: Removed `Cargo.lock` from `.dockerignore`. `--locked` builds now work correctly in Docker.
 
-### 2.6 `.gitignore` excludes `Cargo.lock` ✅
+#### 2.6 `.gitignore` excludes `Cargo.lock` ✅
 
 **Fix**: Removed `Cargo.lock` from `.gitignore`. Added missing patterns: `.DS_Store`, `.env`, `*.sqlite*`, `.vscode/`, `.idea/`, editor swap files.
 
-### 2.7 `discovery.rs` — `expect()` on Semaphore can panic ✅
+#### 2.7 `discovery.rs` — `expect()` on Semaphore can panic ✅
 
 **Fix**: Replaced `.expect("semaphore closed")` with `.map_err(|_| DiscoveryError::SemaphoreClosed)?`. Added `SemaphoreClosed` variant to `DiscoveryError`.
 
-### 2.8 Uplink task — corrupt vs failed message confusion ✅
+#### 2.8 Uplink task — corrupt vs failed message confusion ✅
 
 **Fix**: Separated `valid_ids` from `corrupt_ids`. Corrupt messages are always deleted immediately (preventing head-of-line blocking). Valid messages are only deleted after successful Kafka publish. Failed publishes leave valid messages in the buffer for retry.
 
 ---
 
-## 3. Medium-Severity Issues — RESOLVED
+### 3. Medium-Severity Issues — RESOLVED
 
-### 3.1 `buffer.rs` — `retry_count` column never used ✅
+#### 3.1 `buffer.rs` — `retry_count` column never used ✅
 
 **Fix**: Removed the unused `retry_count` column from the schema.
 
-### 3.2 `buffer.rs` — `BufferConfig.max_connections` ignored ✅
+#### 3.2 `buffer.rs` — `BufferConfig.max_connections` ignored ✅
 
 **Fix**: Added `BufferStore::with_config(config: BufferConfig)` that respects `max_connections`. The existing `new(path)` method now delegates to `with_config` with defaults.
 
-### 3.3 `modbus_client.rs` — Exponential backoff overflow ✅
+#### 3.3 `modbus_client.rs` — Exponential backoff overflow ✅
 
 **Fix**: Clamped shift to 63 with `u32::try_from(attempt).unwrap_or(63).min(63)` instead of using `checked_shl` with `unwrap_or(u64::MAX)`.
 
-### 3.4 `poller_actor.rs` — Jitter correlates across devices ✅
+#### 3.4 `poller_actor.rs` — Jitter correlates across devices ✅
 
 **Fix**: Added a `device_salt` derived from hashing `(ip, unit_id)`. The jitter seed now includes this salt, ensuring different devices get different jitter patterns even when starting simultaneously.
 
-### 3.5 `poller_actor.rs` — Silent skip of zero-length models ✅
+#### 3.5 `poller_actor.rs` — Silent skip of zero-length models ✅
 
 **Fix**: Added `debug!()` log when skipping zero-length models.
 
-### 3.6 `avro_kafka.rs` — Error context lost in `map_err` ⚠️
+#### 3.6 `avro_kafka.rs` — Error context lost in `map_err` ⚠️
 
 **Status**: Not changed. The `apache_avro::Error` type does not implement `Clone` and wrapping it in `PublishError` would require boxing. The `to_string()` approach is acceptable for now; the error message content is preserved.
 
-### 3.7 `avro_kafka.rs` — Avro schema type mismatch ⚠️
+#### 3.7 `avro_kafka.rs` — Avro schema type mismatch ⚠️
 
 **Status**: Noted but not changed. Avro `"int"` safely widens `u8` and `u16` values. No data loss occurs in practice. A future schema evolution (via Schema Registry) can use more precise types.
 
-### 3.8 `sunspec_parser.rs` — Limited model name lookup ⚠️
+#### 3.8 `sunspec_parser.rs` — Limited model name lookup ⚠️
 
 **Status**: Noted for future work. Only 5 models are named. Loading from a resource file is a good enhancement but out of scope for this review.
 
-### 3.9 `main.rs` — Infinite respawn without backoff ✅
+#### 3.9 `main.rs` — Infinite respawn without backoff ✅
 
 **Fix**: Added per-device `respawn_counts` tracking and a `respawn_delay()` function with exponential backoff (base delay * 2^failures, capped at 60 seconds). Successful exits reset the counter.
 
-### 3.10 `#![allow(dead_code)]` in every crate ✅
+#### 3.10 `#![allow(dead_code)]` in every crate ✅
 
 **Fix**: Removed `#![allow(dead_code)]` from all 7 library crates: `types`, `discovery`, `modbus-client`, `sunspec-parser`, `poller-actor`, `avro-kafka`, and `buffer`.
 
 ---
 
-## 4. Low-Severity Issues — RESOLVED
+### 4. Low-Severity Issues — RESOLVED
 
-### 4.1 `.gitignore` missing common patterns ✅
+#### 4.1 `.gitignore` missing common patterns ✅
 
 **Fix**: Added `.DS_Store`, `.env`, `*.sqlite*`, `.vscode/`, `.idea/`, swap files.
 
-### 4.2 `rustfmt.toml` is minimal ✅
+#### 4.2 `rustfmt.toml` is minimal ✅
 
 **Fix**: Added `max_width = 100`, `reorder_imports = true`, `reorder_modules = true`.
 
-### 4.3 `Cargo.toml` — Tokio `"full"` feature ✅
+#### 4.3 `Cargo.toml` — Tokio `"full"` feature ✅
 
 **Fix**: Replaced `features = ["full"]` with specific features: `["rt-multi-thread", "macros", "io-util", "net", "time", "sync", "signal"]`.
 
-### 4.4 `deploy-docs.yml` — mdBook version not pinned ✅
+#### 4.4 `deploy-docs.yml` — mdBook version not pinned ✅
 
 **Fix**: Changed from `mdbook-version: 'latest'` to `mdbook-version: '0.4.40'`.
 
-### 4.5 No `MSRV` specified ✅
+#### 4.5 No `MSRV` specified ✅
 
 **Fix**: Added `rust-version = "1.80"` to `[workspace.package]` in root `Cargo.toml`.
 
-### 4.6 ARM64 Dockerfile uses `:latest` tag ⚠️
+#### 4.6 ARM64 Dockerfile uses `:latest` tag ⚠️
 
 **Status**: Not changed. Requires testing with a pinned version of the cross image.
 
 ---
 
-## 5. Remaining Future Work
+### 5. Remaining Future Work
 
 These items were identified but are enhancements, not bugs:
 
@@ -162,7 +224,7 @@ These items were identified but are enhancements, not bugs:
 
 ---
 
-## 6. Security Observations
+### 6. Security Observations
 
 | Area | Status | Notes |
 |------|--------|-------|
@@ -175,7 +237,7 @@ These items were identified but are enhancements, not bugs:
 
 ---
 
-## 7. Performance Observations
+### 7. Performance Observations
 
 | Component | Observation | Impact |
 |-----------|------------|--------|
@@ -187,7 +249,7 @@ These items were identified but are enhancements, not bugs:
 
 ---
 
-## 8. Test Coverage Assessment
+### 8. Test Coverage Assessment
 
 | Crate | Unit Tests | Integration Tests | Gaps |
 |-------|-----------|-------------------|------|
@@ -202,7 +264,7 @@ These items were identified but are enhancements, not bugs:
 
 ---
 
-## Files Modified
+### Files Modified
 
 | File | Changes |
 |------|---------|

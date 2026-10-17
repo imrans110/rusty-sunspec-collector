@@ -5,9 +5,11 @@
 ---
 
 - [Developer Guide](DEVELOPER_GUIDE.md)
+- [Building & Packaging](build.md)
 - [Configuration](configuration.md)
 - [Architecture](ARCHITECTURE.md)
 - [Operations](ops.md)
+- [Buffer Maintenance](buffer_maintenance.md)
 
 ---
 

@@ -203,6 +203,8 @@ pub async fn run_device(
     let device = config.identity.key();
     let salt = device_hash(&config.identity);
     let mut failures = 0u32;
+    // Publish the series from the start so a device that never answers shows up as down.
+    gauge!("sunspec_device_up", "device" => device.clone()).set(0.0);
 
     loop {
         if *shutdown.borrow() {
@@ -297,12 +299,20 @@ async fn poll_device(
 
     let client = match ModbusClient::connect(modbus).await {
         Ok(client) => client,
-        Err(err) => return err.into(),
+        Err(err) => {
+            count_error(&device, &err);
+            return err.into();
+        }
     };
     let bases = base_candidates(config.base_address);
     let (base, models) = match discover_models(&client, identity.unit_id, &bases).await {
         Ok(found) => found,
-        Err(err) => return err,
+        Err(err) => {
+            if let PollerError::Modbus(ref modbus_err) = err {
+                count_error(&device, modbus_err);
+            }
+            return err;
+        }
     };
     info!(
         device = %device,
@@ -364,12 +374,7 @@ async fn poll_device(
                 }
                 Err(err) => {
                     cycle_failed = true;
-                    counter!(
-                        "sunspec_poll_errors_total",
-                        "device" => device.clone(),
-                        "kind" => error_kind(&err)
-                    )
-                    .increment(1);
+                    count_error(&device, &err);
                     warn!(device = %device, model_id = model.id, error = %err, "modbus read failed");
                 }
             }
@@ -391,6 +396,15 @@ async fn poll_device(
             "poll cycle complete"
         );
     }
+}
+
+fn count_error(device: &str, err: &ClientError) {
+    counter!(
+        "sunspec_poll_errors_total",
+        "device" => device.to_string(),
+        "kind" => error_kind(err)
+    )
+    .increment(1);
 }
 
 fn error_kind(err: &ClientError) -> &'static str {
