@@ -9,7 +9,7 @@ use tokio::time::{sleep, timeout};
 use tracing::{info, warn};
 
 use discovery::discover_subnet;
-use poller_actor::{run_device, DeviceConfig, DeviceHealth, PollSample};
+use poller_actor::{run_device, DeviceConfig, DeviceHealth, Sample};
 use types::DeviceIdentity;
 
 use crate::config::CollectorConfig;
@@ -22,7 +22,7 @@ const STOP_GRACE: Duration = Duration::from_secs(10);
 /// Returns after shutdown, once every device task has stopped.
 pub async fn run(
     config: CollectorConfig,
-    sender: mpsc::Sender<PollSample>,
+    sender: mpsc::Sender<Sample>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut tasks = JoinSet::new();

@@ -9,17 +9,13 @@ fn producer_accepts_every_supported_compression_codec() {
             compression: codec.to_string(),
             ..Default::default()
         };
-        let result = Publisher::new_kafka(Publisher::default_schema(), "sunspec.telemetry", config);
+        let result = Publisher::new_kafka("sunspec.telemetry", config);
         assert!(result.is_ok(), "codec {codec} rejected: {:?}", result.err());
     }
 }
 
 #[test]
 fn default_config_creates_a_producer() {
-    let result = Publisher::new_kafka(
-        Publisher::default_schema(),
-        "sunspec.telemetry",
-        KafkaConfig::default(),
-    );
+    let result = Publisher::new_kafka("sunspec.telemetry", KafkaConfig::default());
     assert!(result.is_ok(), "{:?}", result.err());
 }

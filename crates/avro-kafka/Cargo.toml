@@ -7,13 +7,13 @@ repository.workspace = true
 description = "Avro OCF serialization with Kafka producer"
 
 [dependencies]
-serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-apache-avro = { version = "0.21", features = ["derive"] }
+apache-avro = "0.21"
 rdkafka = { version = "0.39", features = ["cmake-build", "ssl", "tokio", "zstd"] }
 
 types = { path = "../types" }
 
 [dev-dependencies]
 tokio = { workspace = true }
+apache-avro = "0.21"

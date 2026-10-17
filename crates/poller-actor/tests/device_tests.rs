@@ -4,7 +4,7 @@ use std::time::Duration;
 use modbus_client::{ClientConfig, ModbusClient};
 use poller_actor::{
     base_candidates, discover_models, run_device, ActorConfig, DeviceConfig, DeviceHealth,
-    PollSample, PollerError,
+    PollerError, Sample,
 };
 use sunspec_sim::{parse_models, SimConfig, SimHandle, UnitSpec};
 use tokio::sync::{mpsc, watch};
@@ -103,7 +103,7 @@ async fn reports_a_device_without_a_sunspec_map() {
 async fn device_offline_at_startup_is_polled_once_it_appears() {
     let sim = start_sim(UnitSpec::inverter(1)).await;
     sim.go_offline();
-    let (tx, mut rx) = mpsc::channel::<PollSample>(64);
+    let (tx, mut rx) = mpsc::channel::<Sample>(64);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let health = Arc::new(DeviceHealth::default());
     let task = tokio::spawn(run_device(
@@ -141,7 +141,7 @@ async fn stalled_session_is_restarted() {
         stall_timeout: Some(Duration::from_millis(500)),
         ..fast_actor()
     };
-    let (tx, mut rx) = mpsc::channel::<PollSample>(1024);
+    let (tx, mut rx) = mpsc::channel::<Sample>(1024);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let health = Arc::new(DeviceHealth::default());
     let task = tokio::spawn(run_device(

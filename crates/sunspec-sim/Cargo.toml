@@ -9,3 +9,5 @@ description = "SunSpec Modbus TCP device simulator for tests and local developme
 [dependencies]
 tokio = { workspace = true }
 tracing = { workspace = true }
+
+sunspec-parser = { path = "../sunspec-parser" }

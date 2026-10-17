@@ -7,5 +7,5 @@ mod retention;
 mod systemd;
 mod uplink;
 
-pub use app::run;
+pub use app::{run, run_with_publisher};
 pub use config::CollectorConfig;

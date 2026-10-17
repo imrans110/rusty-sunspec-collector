@@ -13,12 +13,25 @@ use crate::config::CollectorConfig;
 use crate::uplink::UplinkConfig;
 use crate::{devices, ingest, metrics_server, retention, systemd, uplink};
 
-/// Runs the collector until `shutdown` resolves, then stops every task in order:
-/// device pollers first, then ingest (which drains the channel into the buffer),
-/// then the uplink (after a bounded final drain to Kafka).
+/// Runs the collector until `shutdown` resolves, publishing to the Kafka brokers in
+/// `config` (or only logging records when no brokers are configured).
 pub async fn run(
     config: CollectorConfig,
     metrics: Option<PrometheusHandle>,
+    shutdown: impl Future<Output = ()>,
+) -> Result<()> {
+    let publisher = build_publisher(&config)?;
+    run_with_publisher(config, metrics, publisher, shutdown).await
+}
+
+/// Like [`run`], with a caller-supplied publisher (e.g. an in-memory one in tests).
+///
+/// On shutdown, tasks stop in order: device pollers first, then ingest (which drains
+/// the channel into the buffer), then the uplink (after a bounded final drain).
+pub async fn run_with_publisher(
+    config: CollectorConfig,
+    metrics: Option<PrometheusHandle>,
+    publisher: Publisher,
     shutdown: impl Future<Output = ()>,
 ) -> Result<()> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -30,7 +43,6 @@ pub async fn run(
         ));
     }
 
-    let publisher = build_publisher(&config)?;
     let buffer = BufferStore::new(&config.buffer_path)
         .await
         .context("buffer init failed")?;
@@ -88,7 +100,7 @@ fn build_publisher(config: &CollectorConfig) -> Result<Publisher> {
         .clone()
         .unwrap_or_else(|| "sunspec.telemetry".to_string());
     let Some(brokers) = config.kafka_brokers.clone() else {
-        return Ok(Publisher::new_mock(Publisher::default_schema(), topic));
+        return Ok(Publisher::new_log(topic));
     };
 
     let defaults = KafkaConfig::default();
@@ -107,6 +119,5 @@ fn build_publisher(config: &CollectorConfig) -> Result<Publisher> {
             .kafka_enable_idempotence
             .unwrap_or(defaults.enable_idempotence),
     };
-    Publisher::new_kafka(Publisher::default_schema(), topic, kafka_config)
-        .context("kafka publisher init failed")
+    Publisher::new_kafka(topic, kafka_config).context("kafka publisher init failed")
 }

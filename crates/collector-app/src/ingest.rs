@@ -6,7 +6,7 @@ use tokio::time::sleep;
 use tracing::{info, warn};
 
 use buffer::BufferStore;
-use poller_actor::PollSample;
+use poller_actor::Sample;
 
 /// Most samples written in one transaction.
 const MAX_BATCH: usize = 256;
@@ -16,7 +16,7 @@ const COALESCE_WINDOW: Duration = Duration::from_millis(100);
 /// Persists samples from the pollers into the buffer, grouping samples that arrive
 /// close together into one transaction. Runs until every sender is dropped, so
 /// samples still queued at shutdown are written before it returns.
-pub async fn run(mut rx: mpsc::Receiver<PollSample>, buffer: BufferStore, topic: String) {
+pub async fn run(mut rx: mpsc::Receiver<Sample>, buffer: BufferStore, topic: String) {
     let mut batch = Vec::with_capacity(MAX_BATCH);
     let mut closed = false;
 
@@ -44,7 +44,7 @@ pub async fn run(mut rx: mpsc::Receiver<PollSample>, buffer: BufferStore, topic:
     info!("ingest stopped");
 }
 
-async fn persist(buffer: &BufferStore, topic: &str, batch: &mut Vec<PollSample>) {
+async fn persist(buffer: &BufferStore, topic: &str, batch: &mut Vec<Sample>) {
     // Store lightweight JSON in the buffer; Avro is produced at uplink time.
     let payloads: Vec<Vec<u8>> = batch
         .drain(..)
@@ -71,8 +71,8 @@ mod tests {
     use super::*;
     use types::DeviceIdentity;
 
-    fn sample(n: u16) -> PollSample {
-        PollSample {
+    fn sample(n: u16) -> Sample {
+        Sample {
             device: DeviceIdentity {
                 ip: "127.0.0.1".to_string(),
                 unit_id: 1,
@@ -82,6 +82,7 @@ mod tests {
             start: 40_070,
             registers: vec![n],
             collected_at_ms: u64::from(n),
+            points: Vec::new(),
         }
     }
 
@@ -107,8 +108,8 @@ mod tests {
 
         let rows = buffer.dequeue_batch(10_000).await.unwrap();
         assert_eq!(rows.len(), 600);
-        let first: PollSample = serde_json::from_slice(&rows[0].payload).unwrap();
-        let last: PollSample = serde_json::from_slice(&rows[599].payload).unwrap();
+        let first: Sample = serde_json::from_slice(&rows[0].payload).unwrap();
+        let last: Sample = serde_json::from_slice(&rows[599].payload).unwrap();
         assert_eq!((first.registers[0], last.registers[0]), (0, 599));
         for suffix in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));

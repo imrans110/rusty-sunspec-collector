@@ -4,9 +4,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use buffer::BufferStore;
 use collector_app::CollectorConfig;
-use poller_actor::PollSample;
+use poller_actor::Sample;
 use sunspec_sim::{parse_models, SimConfig, SimHandle, UnitSpec, Unmapped};
-use types::DeviceIdentity;
+use types::{DeviceIdentity, PointValue};
 
 /// A collector polling the simulator every 100 ms whose uplink never drains (no
 /// periodic drain, no final drain), so the buffer holds everything collected.
@@ -40,7 +40,7 @@ async fn run_for(config: CollectorConfig, duration: Duration) {
         .expect("collector run");
 }
 
-async fn buffered_samples(path: &str) -> Vec<PollSample> {
+async fn buffered_samples(path: &str) -> Vec<Sample> {
     let buffer = BufferStore::new(path).await.expect("open buffer");
     buffer
         .dequeue_batch(100_000)
@@ -138,13 +138,14 @@ async fn subnet_mode_keeps_running_and_finds_devices_on_rescan() {
 #[tokio::test]
 async fn uplink_drains_a_backlog_without_pausing_between_batches() {
     let path = temp_db_path("drain");
-    let sample = PollSample {
+    let sample = Sample {
         device: static_devices(&[1]).remove(0),
         model_id: 103,
         model_name: "three_phase_inverter".to_string(),
         start: 40_070,
         registers: vec![0; 52],
         collected_at_ms: 0,
+        points: Vec::new(),
     };
     let payload = serde_json::to_vec(&sample).unwrap();
     {
@@ -174,6 +175,71 @@ async fn uplink_drains_a_backlog_without_pausing_between_batches() {
         .await
         .unwrap();
     assert_eq!(remaining, 0, "5,000-row backlog should drain within 2 s");
+    cleanup(&path);
+}
+
+#[tokio::test]
+async fn publishes_decoded_records_keyed_by_device() {
+    let sim = sunspec_sim::start(
+        SimConfig {
+            units: vec![UnitSpec::inverter(1), UnitSpec::inverter(2)],
+            unmapped: Unmapped::Exception,
+        },
+        "127.0.0.1:0".parse().unwrap(),
+    )
+    .await
+    .unwrap();
+    sim.set_text(1, 1, "Mn", "Rusty SunSpec");
+    sim.set_point(1, 103, "W", &[4321]);
+    sim.set_point(1, 103, "W_SF", &[(-1i16) as u16]);
+    let path = temp_db_path("records");
+    let mut config = config(&sim, &path);
+    config.discovery.static_devices = static_devices(&[1, 2]);
+    config.buffer_drain_interval_ms = 100;
+    config.shutdown_drain_timeout_ms = 2_000;
+    let (publisher, sink) = avro_kafka::Publisher::new_memory("sunspec.telemetry");
+
+    collector_app::run_with_publisher(
+        config,
+        None,
+        publisher,
+        tokio::time::sleep(Duration::from_millis(1_500)),
+    )
+    .await
+    .expect("collector run");
+
+    let records = sink.records();
+    let keys: BTreeSet<&str> = records.iter().map(|record| record.key.as_str()).collect();
+    assert_eq!(keys, BTreeSet::from(["127.0.0.1/1", "127.0.0.1/2"]));
+    let samples: Vec<_> = records
+        .iter()
+        .map(|record| avro_kafka::decode(&record.payload).expect("valid single-object record"))
+        .collect();
+    for (record, sample) in records.iter().zip(&samples) {
+        assert_eq!(
+            record.key,
+            sample.device.key(),
+            "record key is the payload's device"
+        );
+    }
+
+    let point = |model_id: u16, name: &str| {
+        samples
+            .iter()
+            .find(|sample| sample.device.unit_id == 1 && sample.model_id == model_id)
+            .and_then(|sample| sample.points.iter().find(|(point, _)| point == name))
+            .map(|(_, value)| value.clone())
+    };
+    assert_eq!(point(103, "W"), Some(PointValue::Float(432.1)));
+    assert_eq!(
+        point(1, "Mn"),
+        Some(PointValue::Text("Rusty SunSpec".to_string()))
+    );
+    let inverter = samples
+        .iter()
+        .find(|sample| sample.model_id == 103)
+        .unwrap();
+    assert_eq!(inverter.model_name, "inverter_three_phase");
     cleanup(&path);
 }
 
