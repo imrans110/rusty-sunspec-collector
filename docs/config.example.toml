@@ -4,6 +4,7 @@ port = 502
 max_concurrency = 64
 per_host_timeout_ms = 200
 unit_ids = [1]                    # Modbus Unit IDs to scan per host (useful for gateways)
+rescan_interval_s = 600           # subnet mode: rescan this often to find new devices
 
 [[discovery.static_devices]]
 ip = "192.168.1.20"
@@ -12,7 +13,9 @@ unit_id = 1
 [poller]
 poll_interval_ms = 1000
 request_timeout_ms = 1000
-jitter_ms = 0
+jitter_ms = 0                     # max random offset of each device's polling schedule
+# stall_timeout_ms = 30000         # restart a device with no successful read for this long
+                                  # (default: max(10 x poll_interval, 30 s))
 
 [modbus]
 max_batch_size = 64
@@ -23,8 +26,7 @@ retry_max_backoff_ms = 2000
 inter_read_delay_ms = 5
 
 [sunspec]
-base_address = 40000
-discovery_register_count = 200
+base_address = 40000              # preferred base; 40000, 0 and 50000 are also probed
 
 [buffer]
 path = "sunspec-buffer.sqlite"

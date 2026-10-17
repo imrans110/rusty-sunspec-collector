@@ -20,12 +20,6 @@ pub struct ModelDefinition {
 
 #[derive(Debug, Error)]
 pub enum ParserError {
-    #[error("missing SunSpec sentinel at base address")]
-    InvalidSentinel,
-    #[error("unexpected end of model list")]
-    UnexpectedEnd,
-    #[error("model length overflow")]
-    LengthOverflow,
     #[error("json parse error: {0}")]
     Json(#[from] serde_json::Error),
     #[error("xml parse error: {0}")]
@@ -34,9 +28,10 @@ pub enum ParserError {
     InvalidAttribute(String),
 }
 
-const SUNSPEC_ID0: u16 = 0x5375;
-const SUNSPEC_ID1: u16 = 0x6e53;
-const SUNSPEC_END_ID: u16 = 0xFFFF;
+/// The two registers ("SunS") that mark the start of a SunSpec register map.
+pub const SUNSPEC_ID: [u16; 2] = [0x5375, 0x6e53];
+/// Model ID that terminates the model chain.
+pub const SUNSPEC_END_ID: u16 = 0xFFFF;
 
 #[derive(Default)]
 pub struct ModelCatalog {
@@ -176,116 +171,6 @@ pub fn parse_models_from_xml(data: &str) -> Result<Vec<ModelDefinition>, ParserE
     Ok(models)
 }
 
-pub fn parse_models_from_registers(
-    base_address: u16,
-    registers: &[u16],
-) -> Result<Vec<ModelDefinition>, ParserError> {
-    if registers.len() < 2 || registers[0] != SUNSPEC_ID0 || registers[1] != SUNSPEC_ID1 {
-        return Err(ParserError::InvalidSentinel);
-    }
-
-    let mut index = 2usize;
-    let mut models = Vec::new();
-
-    while index + 1 < registers.len() {
-        let model_id = registers[index];
-        let model_len = registers[index + 1] as usize;
-        if model_id == SUNSPEC_END_ID {
-            break;
-        }
-
-        let block_len = model_len
-            .checked_add(2)
-            .ok_or(ParserError::LengthOverflow)?;
-        let next_index = index
-            .checked_add(block_len)
-            .ok_or(ParserError::LengthOverflow)?;
-
-        if next_index > registers.len() {
-            warn!(
-                model_id,
-                model_len,
-                available = registers.len(),
-                "model list truncated"
-            );
-            return Err(ParserError::UnexpectedEnd);
-        }
-
-        let start = u16::try_from(u32::from(base_address) + index as u32)
-            .map_err(|_| ParserError::LengthOverflow)?;
-        let length = u16::try_from(block_len).map_err(|_| ParserError::LengthOverflow)?;
-
-        models.push(ModelDefinition {
-            id: model_id,
-            name: model_name(model_id),
-            start,
-            length,
-        });
-
-        index = next_index;
-    }
-
-    if index + 1 >= registers.len() {
-        return Err(ParserError::UnexpectedEnd);
-    }
-
-    Ok(models)
-}
-
-pub fn parse_models_from_registers_lenient(
-    base_address: u16,
-    registers: &[u16],
-) -> Result<Vec<ModelDefinition>, ParserError> {
-    if registers.len() < 2 || registers[0] != SUNSPEC_ID0 || registers[1] != SUNSPEC_ID1 {
-        return Err(ParserError::InvalidSentinel);
-    }
-
-    let mut index = 2usize;
-    let mut models = Vec::new();
-
-    while index + 1 < registers.len() {
-        let model_id = registers[index];
-        let model_len = registers[index + 1] as usize;
-        if model_id == SUNSPEC_END_ID {
-            break;
-        }
-
-        let block_len = match model_len.checked_add(2) {
-            Some(value) => value,
-            None => return Err(ParserError::LengthOverflow),
-        };
-        let next_index = match index.checked_add(block_len) {
-            Some(value) => value,
-            None => return Err(ParserError::LengthOverflow),
-        };
-
-        if next_index > registers.len() {
-            warn!(
-                model_id,
-                model_len,
-                available = registers.len(),
-                "model list truncated (lenient mode)"
-            );
-            break;
-        }
-
-        let start = u16::try_from(u32::from(base_address) + index as u32)
-            .map_err(|_| ParserError::LengthOverflow)?;
-        let length = u16::try_from(block_len).map_err(|_| ParserError::LengthOverflow)?;
-
-        models.push(ModelDefinition {
-            id: model_id,
-            name: model_name(model_id),
-            start,
-            length,
-        });
-
-        index = next_index;
-    }
-
-    Ok(models)
-}
-
 /// SunSpec marks absent values with sentinel patterns (e.g., 0x8000 for i16). Returns None when the raw value is a sentinel.
 pub fn apply_scale(raw: PointValue, scale_factor: i16) -> Option<f64> {
     match raw {
@@ -302,7 +187,8 @@ pub fn apply_scale(raw: PointValue, scale_factor: i16) -> Option<f64> {
     }
 }
 
-fn model_name(model_id: u16) -> String {
+/// Human-readable name for well-known SunSpec model IDs.
+pub fn model_name(model_id: u16) -> String {
     match model_id {
         1 => "common".to_string(),
         101 => "inverter".to_string(),

@@ -10,9 +10,17 @@ pub enum PointValue {
     F32(f32),
 }
 
-/// Basic identity for an inverter or battery endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Basic identity for an inverter or battery endpoint. Gateways expose several
+/// devices on one host, so a device is identified by host *and* unit ID.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DeviceIdentity {
     pub ip: String,
     pub unit_id: u8,
+}
+
+impl DeviceIdentity {
+    /// Stable key such as `192.168.1.20/1`, used for logs, metrics and partitioning.
+    pub fn key(&self) -> String {
+        format!("{}/{}", self.ip, self.unit_id)
+    }
 }

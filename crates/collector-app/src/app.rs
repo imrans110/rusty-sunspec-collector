@@ -1,0 +1,98 @@
+use std::future::Future;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use metrics_exporter_prometheus::PrometheusHandle;
+use tokio::sync::{mpsc, watch};
+use tracing::info;
+
+use avro_kafka::{KafkaConfig, Publisher};
+use buffer::BufferStore;
+
+use crate::config::CollectorConfig;
+use crate::{devices, ingest, metrics_server, systemd, uplink};
+
+/// Runs the collector until `shutdown` resolves, then stops every task in order:
+/// device pollers first, then ingest (which drains the channel into the buffer),
+/// then the uplink.
+pub async fn run(
+    config: CollectorConfig,
+    metrics: Option<PrometheusHandle>,
+    shutdown: impl Future<Output = ()>,
+) -> Result<()> {
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    if let Some(handle) = metrics {
+        tokio::spawn(metrics_server::serve(
+            handle,
+            shutdown_rx.clone(),
+            config.metrics_port,
+        ));
+    }
+
+    let publisher = build_publisher(&config)?;
+    let buffer = BufferStore::new(&config.buffer_path)
+        .await
+        .context("buffer init failed")?;
+
+    let (tx, rx) = mpsc::channel(config.channel_capacity);
+    let ingest = tokio::spawn(ingest::run(
+        rx,
+        buffer.clone(),
+        publisher.topic().to_string(),
+    ));
+    let uplink = tokio::spawn(uplink::run(
+        buffer,
+        publisher,
+        shutdown_rx.clone(),
+        config.buffer_batch_size,
+        Duration::from_millis(config.buffer_drain_interval_ms),
+    ));
+    let devices = tokio::spawn(devices::run(config, tx, shutdown_rx.clone()));
+
+    systemd::notify_ready();
+    let watchdog = systemd::start_watchdog(shutdown_rx);
+
+    shutdown.await;
+    info!("shutdown signal received");
+    let _ = shutdown_tx.send(true);
+
+    // Device tasks own the only senders, so once they stop the channel closes and
+    // ingest finishes after persisting everything still queued.
+    let _ = devices.await;
+    let _ = ingest.await;
+    let _ = uplink.await;
+    if let Some(handle) = watchdog {
+        let _ = handle.await;
+    }
+    info!("collector stopped");
+    Ok(())
+}
+
+fn build_publisher(config: &CollectorConfig) -> Result<Publisher> {
+    let topic = config
+        .kafka_topic
+        .clone()
+        .unwrap_or_else(|| "sunspec.telemetry".to_string());
+    let Some(brokers) = config.kafka_brokers.clone() else {
+        return Ok(Publisher::new_mock(Publisher::default_schema(), topic));
+    };
+
+    let defaults = KafkaConfig::default();
+    let kafka_config = KafkaConfig {
+        brokers,
+        client_id: config.kafka_client_id.clone().unwrap_or(defaults.client_id),
+        acks: config.kafka_acks.clone().unwrap_or(defaults.acks),
+        compression: config
+            .kafka_compression
+            .clone()
+            .unwrap_or(defaults.compression),
+        message_timeout_ms: config
+            .kafka_timeout_ms
+            .unwrap_or(defaults.message_timeout_ms),
+        enable_idempotence: config
+            .kafka_enable_idempotence
+            .unwrap_or(defaults.enable_idempotence),
+    };
+    Publisher::new_kafka(Publisher::default_schema(), topic, kafka_config)
+        .context("kafka publisher init failed")
+}

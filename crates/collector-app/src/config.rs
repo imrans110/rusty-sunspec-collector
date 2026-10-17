@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use tracing::warn;
 
 use discovery::DiscoveryConfig;
 use modbus_client::ClientConfig;
@@ -13,7 +14,7 @@ use poller_actor::ActorConfig;
 use types::DeviceIdentity;
 
 const DEFAULT_BASE_ADDRESS: u16 = 40_000;
-const DEFAULT_DISCOVERY_REG_COUNT: u16 = 200;
+const DEFAULT_RESCAN_INTERVAL_S: u64 = 600;
 const DEFAULT_CHANNEL_CAPACITY: usize = 256;
 const DEFAULT_RESPAWN_DELAY_MS: u64 = 1_000;
 const DEFAULT_BUFFER_PATH: &str = "sunspec-buffer.sqlite";
@@ -26,7 +27,8 @@ pub struct CollectorConfig {
     pub modbus: ClientConfig,
     pub poller: ActorConfig,
     pub base_address: u16,
-    pub discovery_register_count: u16,
+    /// How often subnet discovery is repeated to pick up new devices.
+    pub rescan_interval_s: u64,
     pub discovery_unit_ids: Vec<u8>,
     pub channel_capacity: usize,
     pub respawn_delay_ms: u64,
@@ -98,11 +100,13 @@ impl CollectorConfig {
                 anyhow::bail!("modbus.inter_read_delay_ms must be >= 1 when set");
             }
         }
-        if self.base_address == 0 {
-            anyhow::bail!("sunspec.base_address must be >= 1");
+        if self.rescan_interval_s == 0 {
+            anyhow::bail!("discovery.rescan_interval_s must be >= 1");
         }
-        if self.discovery_register_count == 0 {
-            anyhow::bail!("sunspec.discovery_register_count must be >= 1");
+        if let Some(stall) = self.poller.stall_timeout {
+            if stall.is_zero() {
+                anyhow::bail!("poller.stall_timeout_ms must be >= 1 when set");
+            }
         }
         if self.channel_capacity == 0 {
             anyhow::bail!("channel_capacity must be >= 1");
@@ -141,7 +145,7 @@ impl Default for CollectorConfig {
             modbus: ClientConfig::default(),
             poller: ActorConfig::default(),
             base_address: DEFAULT_BASE_ADDRESS,
-            discovery_register_count: DEFAULT_DISCOVERY_REG_COUNT,
+            rescan_interval_s: DEFAULT_RESCAN_INTERVAL_S,
             discovery_unit_ids: vec![1],
             channel_capacity: DEFAULT_CHANNEL_CAPACITY,
             respawn_delay_ms: DEFAULT_RESPAWN_DELAY_MS,
@@ -212,8 +216,14 @@ fn apply_env_overrides(config: &mut CollectorConfig) {
     }
 
     config.base_address = parse_env_u16("SUNSPEC_BASE_ADDRESS").unwrap_or(config.base_address);
-    config.discovery_register_count =
-        parse_env_u16("SUNSPEC_DISCOVERY_REG_COUNT").unwrap_or(config.discovery_register_count);
+    if env::var_os("SUNSPEC_DISCOVERY_REG_COUNT").is_some() {
+        warn!("SUNSPEC_DISCOVERY_REG_COUNT is deprecated and ignored; models are discovered by walking the model chain");
+    }
+    config.rescan_interval_s =
+        parse_env_u64("SUNSPEC_RESCAN_INTERVAL_S").unwrap_or(config.rescan_interval_s);
+    if let Some(stall_ms) = parse_env_u64("SUNSPEC_STALL_TIMEOUT_MS") {
+        config.poller.stall_timeout = Some(Duration::from_millis(stall_ms));
+    }
     config.channel_capacity =
         parse_env_usize("SUNSPEC_CHANNEL_CAPACITY").unwrap_or(config.channel_capacity);
     config.respawn_delay_ms =
@@ -260,6 +270,7 @@ struct FileDiscoveryConfig {
     max_concurrency: Option<usize>,
     per_host_timeout_ms: Option<u64>,
     unit_ids: Option<Vec<u8>>,
+    rescan_interval_s: Option<u64>,
     static_devices: Option<Vec<FileDeviceConfig>>,
 }
 
@@ -274,6 +285,7 @@ struct FilePollerConfig {
     poll_interval_ms: Option<u64>,
     request_timeout_ms: Option<u64>,
     jitter_ms: Option<u64>,
+    stall_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -352,6 +364,9 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) {
         if let Some(timeout) = discovery.per_host_timeout_ms {
             config.discovery.per_host_timeout_ms = timeout;
         }
+        if let Some(interval) = discovery.rescan_interval_s {
+            config.rescan_interval_s = interval;
+        }
         if let Some(devices) = discovery.static_devices {
             config.discovery.static_devices = devices
                 .into_iter()
@@ -372,6 +387,9 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) {
         }
         if let Some(jitter_ms) = poller.jitter_ms {
             config.poller.jitter_ms = jitter_ms;
+        }
+        if let Some(stall_ms) = poller.stall_timeout_ms {
+            config.poller.stall_timeout = Some(Duration::from_millis(stall_ms));
         }
     }
 
@@ -404,8 +422,8 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) {
         if let Some(base) = sunspec.base_address {
             config.base_address = base;
         }
-        if let Some(count) = sunspec.discovery_register_count {
-            config.discovery_register_count = count;
+        if sunspec.discovery_register_count.is_some() {
+            warn!("sunspec.discovery_register_count is deprecated and ignored; models are discovered by walking the model chain");
         }
     }
 
