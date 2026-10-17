@@ -27,18 +27,25 @@ pub fn decode_model(model_id: u16, registers: &[u16]) -> Option<Vec<(String, Poi
 struct Decoder<'a> {
     registers: &'a [u16],
     pos: usize,
-    /// Scale-factor values visible from the group being decoded, innermost last.
-    /// `None` means the scale factor is not implemented.
-    scopes: Vec<HashMap<&'a str, Option<i16>>>,
+    /// Values visible from the group being decoded, innermost group last.
+    scopes: Vec<Scope<'a>>,
     out: Vec<(String, PointValue)>,
+}
+
+/// Points of one group instance that other points or groups refer to by name.
+#[derive(Default)]
+struct Scope<'a> {
+    /// Scale factors; `None` means the scale factor is not implemented.
+    scale_factors: HashMap<&'a str, Option<i16>>,
+    /// Integer points that may give a nested group's repetition count (e.g. `NPt`).
+    counts: HashMap<&'a str, u16>,
 }
 
 impl<'a> Decoder<'a> {
     fn group(&mut self, group: &'a GroupDef, prefix: &str, top_level: bool) {
         // Scale factors may follow the points that use them, so slice the whole
         // group first, then compute values.
-        let mut scope = HashMap::new();
-        let mut counts = HashMap::new();
+        let mut scope = Scope::default();
         let mut raws = Vec::with_capacity(group.points.len());
         for point in &group.points {
             let size = usize::from(point.size);
@@ -50,10 +57,12 @@ impl<'a> Decoder<'a> {
             match point.kind {
                 PointType::Sunssf => {
                     let sf = raw[0] as i16;
-                    scope.insert(point.name.as_str(), (sf != i16::MIN).then_some(sf));
+                    scope
+                        .scale_factors
+                        .insert(point.name.as_str(), (sf != i16::MIN).then_some(sf));
                 }
                 PointType::Count | PointType::Uint16 => {
-                    counts.insert(point.name.as_str(), raw[0]);
+                    scope.counts.insert(point.name.as_str(), raw[0]);
                 }
                 _ => {}
             }
@@ -76,7 +85,12 @@ impl<'a> Decoder<'a> {
                 Count::Fixed(0) if size > 0 => (self.registers.len() - self.pos) / size,
                 Count::Fixed(0) => 0,
                 Count::Fixed(count) => usize::from(*count),
-                Count::Point(name) => counts.get(name.as_str()).copied().map_or(0, usize::from),
+                // The count point may live in an enclosing group (e.g. the curve models'
+                // top-level `NPt` sizes `Crv[i].Pt`). 0xFFFF means not implemented.
+                Count::Point(name) => match self.count(name) {
+                    Some(count) if count != u16::MAX => usize::from(count),
+                    _ => 0,
+                },
             };
             let repeating = !matches!(nested.count, Count::Fixed(1));
             for index in 0..repetitions {
@@ -128,7 +142,14 @@ impl<'a> Decoder<'a> {
         self.scopes
             .iter()
             .rev()
-            .find_map(|scope| scope.get(name).copied())
+            .find_map(|scope| scope.scale_factors.get(name).copied())
+    }
+
+    fn count(&self, name: &str) -> Option<u16> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.counts.get(name).copied())
     }
 }
 

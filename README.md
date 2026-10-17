@@ -28,8 +28,9 @@ dropped (and counted) instead of growing the buffer without limit.
 - **Stall detection**: a session with no successful read for `poller.stall_timeout_ms` (default
   the larger of 10 poll intervals and 30 s) is aborted and restarted.
 - **Edge decoding**: bundled official SunSpec definitions for models 1, 101-103, 111-113, 120-124,
-  160, 201-204 and 802. Scale factors are applied, "not implemented" values become null, strings
-  are trimmed, and repeating groups are named `group[i].Point`. Raw registers are kept alongside.
+  160, 201-204, 701-713 (IEEE 1547-2018 DER) and 802. Scale factors are applied, "not implemented"
+  values become null, strings are trimmed, and repeating groups are named `group[i].Point`
+  (nested ones too, e.g. `Crv[1].Pt[2].V`). Raw registers are kept alongside.
 - **Durable buffer**: SQLite in WAL mode. Samples are written in transactions of up to 256 rows.
   Retention drops the oldest rows beyond `buffer.max_rows` or older than `buffer.max_age_s`, and
   every drop is counted in a metric.

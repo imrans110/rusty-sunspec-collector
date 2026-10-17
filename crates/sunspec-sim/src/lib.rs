@@ -472,3 +472,27 @@ pub fn run_demo(handle: SimHandle, unit_ids: Vec<u8>) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_model_ids_use_the_bundled_definition_length() {
+        let models = parse_models("1,103,701,713,705,160:48").unwrap();
+        let lengths: Vec<(u16, u16)> = models.iter().map(|model| (model.id, model.len)).collect();
+        // 705's curves repeat by NCrv/NPt, so a bare ID serves only its fixed part.
+        assert_eq!(
+            lengths,
+            vec![
+                (1, 66),
+                (103, 50),
+                (701, 153),
+                (713, 7),
+                (705, 13),
+                (160, 48)
+            ]
+        );
+        assert!(parse_models("9999").is_err(), "unknown models need id:len");
+    }
+}
