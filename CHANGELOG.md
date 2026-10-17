@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The help text of `sunspec_poll_duration_seconds` now says it times the models due in one poll cycle (it has done so since polling profiles)
 
 ### Fixed
+- The systemd watchdog pings now reach systemd. The readiness notification unset `NOTIFY_SOCKET`, so every watchdog ping after it went nowhere, and with the shipped unit's `WatchdogSec=30` systemd killed and restarted the service about every 30 seconds. sd-notify is updated to 0.5, whose `notify` leaves the environment alone; the release workflow's install test now checks the service outlives its watchdog timeout
 - A scale factor far outside SunSpec's -10 to 10 no longer produces infinite or NaN values (for example `WH_SF = 23901` made `WH` infinite); points whose value is not a finite number, including infinite float readings, are now null. Found by fuzzing
 
 ### Security
