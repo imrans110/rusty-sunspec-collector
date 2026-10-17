@@ -7,8 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `/devices` and `/devices/{host}/{unit}` on the metrics port: each device's state, discovered and polled models, and the latest decoded reading of each polled model, as JSON. Only the latest reading per model is kept
 - Serial devices through serial-to-Ethernet converters: `modbus.framing = "rtu"` (also `SUNSPEC_MODBUS_FRAMING` and a per-device `framing`) speaks Modbus RTU frames over TCP. Units on the same converter share one connection, so their requests never overlap on the RS-485 bus; units sharing a converter must use the same `request_timeout_ms` and `max_batch_size`. `--probe` works through converters too
 - `sunspec-sim --rtu` and `sunspec_sim::start_rtu_over_tcp` simulate a converter (RTU framing with CRC; absent units stay silent); `ModbusClient::new` creates a client that connects on its first read
+
+### Changed
+- The help text of `sunspec_poll_duration_seconds` now says it times the models due in one poll cycle (it has done so since polling profiles)
 
 ## [0.4.0] - 2026-10-17
 

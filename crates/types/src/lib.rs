@@ -109,8 +109,9 @@ mod hex_registers {
     }
 }
 
-/// Points as a JSON object that keeps definition order.
-mod ordered_points {
+/// Points as a JSON object that keeps definition order; use with
+/// `#[serde(with = "types::ordered_points")]`.
+pub mod ordered_points {
     use std::fmt;
 
     use serde::de::{MapAccess, Visitor};

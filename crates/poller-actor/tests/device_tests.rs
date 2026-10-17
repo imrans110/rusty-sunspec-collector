@@ -316,3 +316,33 @@ async fn a_device_with_nothing_selected_is_retried_without_polling() {
         );
     }
 }
+
+#[tokio::test]
+async fn the_snapshot_holds_discovery_and_the_latest_reading_of_each_polled_model() {
+    let sim = start_sim(UnitSpec::with_models(1, parse_models("1,103,120").unwrap())).await;
+    sim.set_point(1, 103, "W", &[4321]);
+    let actor = ActorConfig {
+        models: ModelSchedule {
+            exclude: BTreeSet::from([120]),
+            ..Default::default()
+        },
+        ..fast_actor()
+    };
+
+    let (_, health) = run_for(&sim, actor, Duration::from_millis(500)).await;
+
+    let snapshot = health.snapshot();
+    assert_eq!(snapshot.base_address, Some(40_000));
+    assert_eq!(snapshot.models, vec![1, 103, 120]);
+    assert_eq!(snapshot.polled_models, vec![1, 103]);
+    assert_eq!(
+        snapshot.readings.keys().copied().collect::<Vec<_>>(),
+        vec![1, 103],
+        "one reading per polled model"
+    );
+    let inverter = &snapshot.readings[&103];
+    assert!(inverter
+        .points
+        .iter()
+        .any(|(name, value)| name == "W" && *value == types::PointValue::Float(4321.0)));
+}

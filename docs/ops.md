@@ -282,7 +282,7 @@ samples stay in the buffer and are published after the restart.
 
 ## HTTP endpoints
 
-Both endpoints are served on `metrics.port` (default 9090) on all IPv4 interfaces.
+All three endpoints are served on `metrics.port` (default 9090) on all IPv4 interfaces.
 
 ### `/metrics`
 
@@ -318,6 +318,42 @@ The Docker `HEALTHCHECK` calls this endpoint, and the systemd watchdog uses the 
 
 If `metrics.port` cannot be bound (for example, it is already in use), the collector exits at
 startup with `Error: bind metrics port <port>` and the operating-system error.
+
+### `/devices`
+
+The live view of every supervised device: its state, what its latest session discovered, and
+the latest decoded reading of each polled model. Use it when commissioning ("is it reading my
+inverter, and are the values right?") or to see data without a Kafka consumer.
+
+```sh
+curl -s localhost:9090/devices                     # every device
+curl -s localhost:9090/devices/192.168.1.50/126    # one device (404 if it is not supervised)
+```
+
+```json
+{"devices": [{
+  "device": "192.168.1.50/126", "host": "192.168.1.50", "unit_id": 126,
+  "up": true, "last_success_ms": 1792250000123, "restarts": 0,
+  "base_address": 40000, "models": [1, 103, 120, 160], "polled_models": [1, 103, 160],
+  "readings": [
+    {"model_id": 103, "model_name": "inverter_three_phase", "collected_at_ms": 1792250000123,
+     "age_s": 0.4, "points": {"A": 7.98, "PhVphA": 230.3, "W": 5509.0, "Hz": 50.02, "St": 4}}
+  ]
+}]}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `up`, `last_success_ms`, `restarts` | The same state as `sunspec_device_up`, `sunspec_device_last_success_timestamp_seconds` and `sunspec_poller_restarts_total`. `last_success_ms` is `null` before the first successful read. |
+| `base_address`, `models` | Where the `SunS` marker was found and the model chain, from the latest discovery; `null` and empty until a session has discovered the device. |
+| `polled_models` | The models the [polling profile](configuration.md#polling-profiles) selects. |
+| `readings` | The latest successful read of each polled model, in device order: decoded points in definition order (scale factors applied, "not implemented" values `null`), and how old the read is. A model on a slow interval shows its last read until the next one. |
+
+Only the latest reading of each model is kept, so memory does not grow. A device that has never
+answered is listed with empty `models` and `readings`.
+
+The endpoint exposes device data (readings, models, addresses) to anyone who can reach
+`metrics.port`, like `/metrics`. Keep the port on a management network or behind a firewall.
 
 ---
 
@@ -614,8 +650,10 @@ without the hardware (see `fixtures/devices/README.md`).
 
 ### A device is not polled
 
-1. Check that the collector knows the device: `sunspec_devices_known`, `devices_total` in
-   `/healthz`, and a `starting device poller device=host/unit` log line. In subnet mode the host
+1. Check that the collector knows the device: `curl localhost:9090/devices` lists every
+   supervised device with its state and latest readings; `sunspec_devices_known`,
+   `devices_total` in `/healthz`, and a `starting device poller device=host/unit` log line say the
+   same. In subnet mode the host
    must accept a TCP connection on the Modbus port within `discovery.per_host_timeout_ms`.
 2. Check `sunspec_device_up{device="host/unit"}`. A value of 0 means the device is not being
    read successfully; if `sunspec_device_last_success_timestamp_seconds` has no series for it,

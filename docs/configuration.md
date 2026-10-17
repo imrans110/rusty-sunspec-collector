@@ -271,7 +271,7 @@ collector after rotating them (the buffer keeps unsent data across the restart).
 
 | File key | Env var | Default | Notes |
 |----------|---------|---------|-------|
-| `metrics.port` | `SUNSPEC_METRICS_PORT` | `9090` | Port for `/metrics` and `/healthz`, bound on all IPv4 interfaces (`0.0.0.0`). `0` lets the OS pick a free port; the chosen address is logged. If the port cannot be bound (for example, it is in use), the collector exits at startup with `bind metrics port <port>`. |
+| `metrics.port` | `SUNSPEC_METRICS_PORT` | `9090` | Port for `/metrics`, `/healthz` and `/devices`, bound on all IPv4 interfaces (`0.0.0.0`). `0` lets the OS pick a free port; the chosen address is logged. If the port cannot be bound (for example, it is in use), the collector exits at startup with `bind metrics port <port>`. |
 
 The Docker image's `HEALTHCHECK` calls `http://localhost:${SUNSPEC_METRICS_PORT:-9090}/healthz`,
 so it follows the port when you set it with `SUNSPEC_METRICS_PORT`. If you set `metrics.port` in a

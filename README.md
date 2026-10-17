@@ -46,7 +46,8 @@ dropped (and counted) instead of growing the buffer without limit.
   compression. Only acknowledged rows are deleted; the rest stay buffered and are retried first.
 - **Graceful shutdown** on SIGINT or SIGTERM: pollers stop, queued samples are written to the
   buffer, and the uplink keeps draining for up to `buffer.shutdown_drain_timeout_ms`.
-- **Observability**: Prometheus metrics and a `/healthz` endpoint on one port, structured logs
+- **Observability**: Prometheus metrics, a `/healthz` endpoint and a `/devices` view of each
+  device's latest decoded readings on one port, structured logs
   (text or JSON), and a systemd watchdog that is pinged only while the pipeline is healthy.
 - **Strict configuration**: TOML or JSON file plus `SUNSPEC_*` environment variables. Unknown keys
   and invalid values stop the collector at startup instead of falling back to defaults.
@@ -131,6 +132,7 @@ SUNSPEC_STATIC_DEVICES=127.0.0.1:1,127.0.0.1:2 SUNSPEC_PORT=1502 \
 
 Without `SUNSPEC_KAFKA_BROKERS` the collector does not connect to Kafka: it logs each record's key
 and size at debug level instead of publishing it (`RUST_LOG=info,avro_kafka=debug` to see them).
+To see the decoded values, open <http://localhost:9090/devices>.
 To publish to the Compose Kafka broker, add `SUNSPEC_KAFKA_BROKERS=localhost:29092`.
 
 Simulator flags: `--bind ADDR:PORT` (default `0.0.0.0:1502`), `--units 1,2` (default `1`),
@@ -203,12 +205,15 @@ The full reference is in [docs/configuration.md](docs/configuration.md). Starter
 
 ## Observability
 
-The collector serves two endpoints on `metrics.port` (default 9090). If the port cannot be bound,
+The collector serves three endpoints on `metrics.port` (default 9090). If the port cannot be bound,
 the collector stops at startup with `bind metrics port <port>`.
 
 - `/metrics`: Prometheus text format. `*_seconds` metrics are histograms.
 - `/healthz`: 200 while ingest and the uplink have checked in within the last 120 s, otherwise
   503, with a JSON body. A device being offline does not make the collector unhealthy.
+- `/devices`: every device's state, discovered models and latest decoded readings, as JSON
+  (`/devices/<host>/<unit>` for one device). It exposes device data, so keep the port on a
+  management network.
 
 Metrics worth alerting on (per-device metrics have a `device="host/unit"` label):
 
