@@ -93,7 +93,9 @@ the multi-arch images without publishing them.
   connections, offline devices) for failure-path tests.
 - Update the documentation in `docs/` and the `[Unreleased]` section of `CHANGELOG.md` when you
   change behaviour, configuration, metrics or the Kafka record format. Mark breaking changes.
-- All CI checks must pass before a PR is merged.
+- All CI checks must pass before a PR is merged. A PR that changes only documentation (other
+  than the docs files the tests read) skips the build, test and Docker jobs; see the CI section
+  of the [Developer Guide](docs/DEVELOPER_GUIDE.md#ci).
 
 ## Cutting a release
 

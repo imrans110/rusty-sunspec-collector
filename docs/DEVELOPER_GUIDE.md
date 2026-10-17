@@ -372,14 +372,28 @@ it logged `collector stopped` and exited with code 0.
 `.github/workflows/ci.yml` runs on every push to `main` and on every pull request, with
 `RUSTFLAGS=-Dwarnings`:
 
-| Job | What it runs |
-|-----|--------------|
-| Check & Lint | `cargo fmt --all -- --check`, `cargo clippy --all-targets --workspace`, `cargo build --workspace` |
-| Test | `cargo test --workspace` |
-| Security Audit | `cargo audit` |
-| Docker E2E | The compose stack end to end (see [Kafka integration tests](#kafka-integration-tests)) |
+| Job | What it runs | On a pull request, runs when it changes |
+|-----|--------------|------------------------------------------|
+| Changes | Classifies the PR's changed files | Always |
+| Check & Lint | `cargo fmt --all -- --check`, `cargo clippy --all-targets --workspace`, `cargo build --workspace` | Code (see below) |
+| Test | `cargo test --workspace` | Code |
+| Security Audit | `cargo audit` (prebuilt `cargo-audit`) | `Cargo.lock`, a `Cargo.toml` or `ci.yml` |
+| Docker E2E | The compose stack end to end (see [Kafka integration tests](#kafka-integration-tests)) | Code |
 
-Other workflows: `release.yml` builds and tests the release archives and images, and publishes
+"Code" is anything compiled, tested or built into an image: `crates/`, the Cargo files,
+`rustfmt.toml`, `Cross.toml`, the Dockerfiles and `docker/`, `docker-compose.yml`, `fixtures/`,
+`ci.yml`, and the three docs files the tests read (`docs/configuration.md`,
+`docs/config.example.toml`, `docs/sunspec-collector.env`). A PR that changes only other files
+(README, other docs, images, issue templates, the release or docs workflows) skips the jobs it
+does not need. The four jobs stay required for merging: a job skipped by its `if:` reports as
+skipped, which GitHub counts as passing. If you add a file that tests or the image build read, add
+it to the Changes job's list. Pushes to `main` always run every job.
+
+A new push to a pull request cancels that PR's run in progress. `audit.yml` runs `cargo audit`
+on `main` every day as well, because advisories are published for dependencies that have not
+changed.
+
+Other workflows: `audit.yml` is the daily audit above, `release.yml` builds and tests the release archives and images, and publishes
 them on a `v*` tag (see [Building & Packaging](build.md#release-workflow)), and `deploy-docs.yml` publishes this
 book to GitHub Pages on pushes to `main` that touch `docs/` or `README.md` (mdBook 0.4.40).
 
