@@ -122,12 +122,11 @@ pub async fn discover_subnet(
 
         if join_set.len() >= config.max_concurrency {
             if let Some(result) = join_set.join_next().await {
-                 if let Some(found_list) = result? {
+                if let Some(found_list) = result? {
                     devices.extend(found_list);
-                 }
+                }
             }
         }
-
 
         if current == last {
             break;

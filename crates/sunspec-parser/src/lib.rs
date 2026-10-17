@@ -122,7 +122,9 @@ pub fn parse_models_from_xml(data: &str) -> Result<Vec<ModelDefinition>, ParserE
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref event)) if event.name().as_ref() == b"model" => {
+            Ok(Event::Start(ref event) | Event::Empty(ref event))
+                if event.name().as_ref() == b"model" =>
+            {
                 let mut id = None;
                 let mut name = None;
                 let mut length = None;
@@ -134,21 +136,18 @@ pub fn parse_models_from_xml(data: &str) -> Result<Vec<ModelDefinition>, ParserE
 
                     match key {
                         b"id" => {
-                            id = Some(
-                                value
-                                    .parse::<u16>()
-                                    .map_err(|_| ParserError::InvalidAttribute("id".to_string()))?,
-                            );
+                            id =
+                                Some(value.parse::<u16>().map_err(|_| {
+                                    ParserError::InvalidAttribute("id".to_string())
+                                })?);
                         }
                         b"name" => {
                             name = Some(value);
                         }
                         b"len" | b"length" => {
-                            length = Some(
-                                value
-                                    .parse::<u16>()
-                                    .map_err(|_| ParserError::InvalidAttribute("length".to_string()))?,
-                            );
+                            length = Some(value.parse::<u16>().map_err(|_| {
+                                ParserError::InvalidAttribute("length".to_string())
+                            })?);
                         }
                         _ => {}
                     }

@@ -8,7 +8,7 @@ use serde::Serialize;
 use thiserror::Error;
 use tracing::info;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Publisher {
     schema: Schema,
     topic: String,
@@ -55,7 +55,7 @@ impl Publisher {
                     "false"
                 },
             )
-            .set("message.timeout.ms", &config.message_timeout_ms.to_string())
+            .set("message.timeout.ms", config.message_timeout_ms.to_string())
             .create()
             .map_err(PublishError::KafkaConfig)?;
 
@@ -68,14 +68,14 @@ impl Publisher {
     }
 
     pub async fn publish<T: Serialize>(&self, value: &T) -> Result<(), PublishError> {
-        let payload = self.serialize_batch(std::slice::from_ref(value))?;
+        let payload = self.serialize(value)?;
         self.publish_bytes(&self.topic, &payload).await
     }
 
     pub async fn publish_bytes(&self, topic: &str, payload: &[u8]) -> Result<(), PublishError> {
         match &self.producer {
             Some(producer) => {
-                let record = FutureRecord::to(topic).payload(payload);
+                let record = FutureRecord::<(), [u8]>::to(topic).payload(payload);
                 producer
                     .send(record, Timeout::After(self.timeout))
                     .await
@@ -89,19 +89,22 @@ impl Publisher {
         }
     }
 
+    pub fn serialize<T: Serialize>(&self, value: &T) -> Result<Vec<u8>, PublishError> {
+        self.serialize_batch(std::slice::from_ref(value))
+    }
+
     pub fn serialize_batch<T: Serialize>(&self, values: &[T]) -> Result<Vec<u8>, PublishError> {
         let mut writer = Writer::with_codec(&self.schema, Vec::new(), apache_avro::Codec::Deflate);
         for value in values {
-            let avro_value =
-                apache_avro::to_value(value).map_err(|err| PublishError::Encode(err.to_string()))?;
+            let avro_value = apache_avro::to_value(value)
+                .map_err(|err| PublishError::Encode(err.to_string()))?;
             writer
                 .append(avro_value)
                 .map_err(|err| PublishError::Encode(err.to_string()))?;
         }
         writer
-            .flush()
-            .map_err(|err| PublishError::Encode(err.to_string()))?;
-        Ok(writer.into_inner())
+            .into_inner()
+            .map_err(|err| PublishError::Encode(err.to_string()))
     }
 
     pub fn default_schema() -> Schema {

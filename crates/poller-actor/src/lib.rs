@@ -6,8 +6,8 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
-use modbus_client::{ClientConfig, ClientError, ModbusClient};
 use metrics::counter;
+use modbus_client::{ClientConfig, ClientError, ModbusClient};
 use serde::{Deserialize, Serialize};
 use sunspec_parser::ModelDefinition;
 use types::DeviceIdentity;
@@ -107,8 +107,8 @@ impl PollerActor {
                 {
                     Ok(registers) => {
                         if consecutive_errors > 0 {
-                             info!(ip = %self.identity.ip, "connection recovered");
-                             consecutive_errors = 0;
+                            info!(ip = %self.identity.ip, "connection recovered");
+                            consecutive_errors = 0;
                         }
 
                         let sample = PollSample {
@@ -121,7 +121,7 @@ impl PollerActor {
                         };
 
                         if let Err(err) = self.sender.send(sample).await {
-                             warn!(
+                            warn!(
                                 ip = %self.identity.ip,
                                 unit_id = self.identity.unit_id,
                                 model_id = model.id,
@@ -130,7 +130,8 @@ impl PollerActor {
                             );
                             counter!("poller_error", "ip" => self.identity.ip.clone(), "type" => "channel").increment(1);
                         } else {
-                            counter!("poller_success", "ip" => self.identity.ip.clone()).increment(1);
+                            counter!("poller_success", "ip" => self.identity.ip.clone())
+                                .increment(1);
                         }
                     }
                     Err(err) => {
@@ -161,7 +162,12 @@ impl PollerActor {
             iteration = iteration.wrapping_add(1);
             let elapsed = cycle_start.elapsed();
             let lag = elapsed.saturating_sub(self.config.poll_interval);
-            let delay = jittered_delay(self.config.poll_interval, self.config.jitter_ms, iteration, device_salt);
+            let delay = jittered_delay(
+                self.config.poll_interval,
+                self.config.jitter_ms,
+                iteration,
+                device_salt,
+            );
             info!(
                 ip = %self.identity.ip,
                 unit_id = self.identity.unit_id,

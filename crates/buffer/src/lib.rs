@@ -1,6 +1,7 @@
+use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
 use thiserror::Error;
 use tracing::info;
@@ -48,18 +49,16 @@ impl BufferStore {
     }
 
     pub async fn with_config(config: BufferConfig) -> Result<Self, BufferError> {
-        let url = sqlite_url(&config.path);
+        // Applied per connection, so every pooled connection gets WAL + NORMAL sync.
+        let options = connect_options(&config.path)?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal);
         let pool = SqlitePoolOptions::new()
             .max_connections(config.max_connections)
-            .connect(&url)
+            .connect_with(options)
             .await?;
 
-        sqlx::query("PRAGMA journal_mode = WAL;")
-            .execute(&pool)
-            .await?;
-        sqlx::query("PRAGMA synchronous = NORMAL;")
-            .execute(&pool)
-            .await?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS telemetry_queue (\
                 id INTEGER PRIMARY KEY AUTOINCREMENT,\
@@ -140,11 +139,11 @@ impl BufferStore {
     }
 }
 
-fn sqlite_url(path: &str) -> String {
+fn connect_options(path: &str) -> Result<SqliteConnectOptions, BufferError> {
     if path.starts_with("sqlite:") {
-        path.to_string()
+        Ok(SqliteConnectOptions::from_str(path)?)
     } else {
-        format!("sqlite://{path}")
+        Ok(SqliteConnectOptions::new().filename(path))
     }
 }
 

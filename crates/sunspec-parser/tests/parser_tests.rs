@@ -32,22 +32,7 @@ fn parse_xml_fixture_models() {
 #[test]
 fn parse_register_map_strict_and_lenient() {
     let base = 40_000u16;
-    let registers = vec![
-        0x5375,
-        0x6e53,
-        1,
-        2,
-        0,
-        0,
-        103,
-        4,
-        0,
-        0,
-        0,
-        0,
-        0xFFFF,
-        0,
-    ];
+    let registers = vec![0x5375, 0x6e53, 1, 2, 0, 0, 103, 4, 0, 0, 0, 0, 0xFFFF, 0];
 
     let models = parse_models_from_registers(base, &registers).expect("register parse");
     assert_eq!(models.len(), 2);
@@ -56,22 +41,10 @@ fn parse_register_map_strict_and_lenient() {
     assert_eq!(models[1].start, 40_006);
     assert_eq!(models[1].length, 6);
 
-    let truncated = vec![
-        0x5375,
-        0x6e53,
-        1,
-        2,
-        0,
-        0,
-        103,
-        4,
-        0,
-        0,
-    ];
+    let truncated = vec![0x5375, 0x6e53, 1, 2, 0, 0, 103, 4, 0, 0];
 
     assert!(parse_models_from_registers(base, &truncated).is_err());
-    let models =
-        parse_models_from_registers_lenient(base, &truncated).expect("lenient parse");
+    let models = parse_models_from_registers_lenient(base, &truncated).expect("lenient parse");
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].id, 1);
 }
