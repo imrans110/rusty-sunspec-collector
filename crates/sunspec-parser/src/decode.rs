@@ -10,6 +10,8 @@ use crate::registry::{model_definition, Count, GroupDef, PointDef, PointType, Sc
 /// - Scale factors are applied, so scaled points are `Float`.
 /// - Values the device marks as "not implemented" (SunSpec sentinels) are `Null`, as
 ///   are points whose scale factor is not implemented.
+/// - Values that are not a finite number are `Null`: an infinite float, or a value
+///   scaled by a factor far outside SunSpec's -10 to 10.
 /// - Repeating groups are named `group[i].Point`; fixed nested groups `group.Point`.
 /// - The model header (`ID`, `L`), scale factors and padding are omitted.
 pub fn decode_model(model_id: u16, registers: &[u16]) -> Option<Vec<(String, PointValue)>> {
@@ -184,11 +186,9 @@ impl<'a> Decoder<'a> {
                 Ok(value) => PointValue::Int(value),
                 Err(_) => PointValue::Float(value as f64),
             },
-            (Numeric::Int(value), Some(exponent)) => {
-                PointValue::Float(scale(value as f64, exponent))
-            }
-            (Numeric::Float(value), None) => PointValue::Float(value),
-            (Numeric::Float(value), Some(exponent)) => PointValue::Float(scale(value, exponent)),
+            (Numeric::Int(value), Some(exponent)) => finite(scale(value as f64, exponent)),
+            (Numeric::Float(value), None) => finite(value),
+            (Numeric::Float(value), Some(exponent)) => finite(scale(value, exponent)),
         }
     }
 
@@ -219,15 +219,26 @@ enum Numeric {
     Float(f64),
 }
 
+/// A float point, or `Null` when the value is no reading (infinite or NaN).
+fn finite(value: f64) -> PointValue {
+    if value.is_finite() {
+        PointValue::Float(value)
+    } else {
+        PointValue::Null
+    }
+}
+
 fn scale(value: f64, exponent: i16) -> f64 {
-    // Round away float noise from the power of ten (e.g. 2301 * 0.1).
+    // Round away float noise from the power of ten (e.g. 2301 * 0.1). Past about 1e308
+    // the factor is infinite and rounding would give NaN, so such values stay unrounded.
     let scaled = value * 10f64.powi(i32::from(exponent));
     if exponent < 0 {
-        let factor = 10f64.powi(i32::from(-exponent));
-        (scaled * factor).round() / factor
-    } else {
-        scaled
+        let factor = 10f64.powi(-i32::from(exponent));
+        if factor.is_finite() {
+            return (scaled * factor).round() / factor;
+        }
     }
+    scaled
 }
 
 fn wide(raw: &[u16]) -> u64 {

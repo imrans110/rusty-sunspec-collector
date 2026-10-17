@@ -3,6 +3,8 @@ target/
 .git/
 .github/
 docs/
+# The fuzz build (.clusterfuzzlite/) seeds the config target with the example config.
+!docs/config.example.toml
 .DS_Store
 .env
 .env.local

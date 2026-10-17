@@ -26,6 +26,8 @@ crates/
   collector-app/   – Binary + library: config, devices, ingest, uplink, retention, health,
                      metrics_server, systemd; entry points collector_app::run / run_with_publisher
   sunspec-sim/     – SunSpec Modbus TCP simulator (library + sunspec-sim binary) for tests and compose
+fuzz/              – cargo-fuzz targets (own workspace, nightly): decode_model, model_chain, config;
+                     seeds.py; run in CI by ClusterFuzzLite (.clusterfuzzlite/, fuzz.yml)
 ```
 
 ## Build & Test
@@ -69,7 +71,10 @@ files tests read: `docs/configuration.md`, `docs/config.example.toml`,
 changed. Skipped required jobs count as passing. Keep the list in `ci.yml` in step when tests or
 the image start reading another file. `audit.yml` audits `main` daily. `scorecard.yml` runs
 OpenSSF Scorecard (README badge, Security tab); it must stay minimal (no top-level env or
-defaults, only checkout, upload-artifact, upload-sarif and scorecard-action).
+defaults, only checkout, upload-artifact, upload-sarif and scorecard-action). `codeql.yml` (Rust
+and Actions, `build-mode: none`) and `fuzz.yml` (ClusterFuzzLite, five minutes per code PR,
+30 minutes weekly) run on PRs that change code; neither is required. Fixed fuzz crashes become
+regression tests in the crate's tests.
 
 Workflow hygiene: pin actions to a full commit SHA with the release as a comment
 (`@<sha> # v6.1.0`), Docker base images by digest (the release matrix passes each target's
