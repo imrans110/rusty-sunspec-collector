@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use sunspec_parser::{decode_model, model_definition, model_name, supported_models};
+use sunspec_parser::{decode_model, model_definition, model_name, supported_models, PointType};
 use types::PointValue;
 
 /// A model's registers (header included), zeroed, with `ID` and `L` filled in.
@@ -34,19 +34,103 @@ fn points(model_id: u16, registers: &[u16]) -> HashMap<String, PointValue> {
         .collect()
 }
 
+/// Model IDs of the `models/model_<id>.json` files shipped with the crate.
+fn model_files() -> Vec<u16> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("models");
+    let mut ids: Vec<u16> = std::fs::read_dir(dir)
+        .expect("read models directory")
+        .filter_map(|entry| {
+            let name = entry.expect("directory entry").file_name();
+            let name = name.to_str()?;
+            name.strip_prefix("model_")?
+                .strip_suffix(".json")?
+                .parse()
+                .ok()
+        })
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
 #[test]
-fn every_bundled_model_definition_loads() {
-    assert_eq!(
-        supported_models(),
-        vec![
-            1, 101, 102, 103, 111, 112, 113, 120, 121, 122, 123, 124, 160, 201, 202, 203, 204, 701,
-            702, 703, 704, 705, 706, 707, 708, 709, 710, 711, 712, 713, 802
-        ]
-    );
+fn every_model_file_is_bundled() {
+    let files = model_files();
+    assert_eq!(supported_models(), files);
+    assert!(files.len() >= 112, "only {} models", files.len());
+    for model in [1, 103, 160, 211, 213, 302, 502, 714, 802, 64101] {
+        assert!(files.contains(&model), "model {model} missing");
+    }
     assert_eq!(model_name(103), "inverter_three_phase");
     assert_eq!(model_name(701), "DERMeasureAC");
     assert_eq!(model_name(9_999), "model_9999");
     assert!(decode_model(9_999, &[9_999, 0]).is_none());
+}
+
+/// Every bundled model decodes a zeroed register map: each top-level point appears
+/// once, names are unique (records carry them as map keys), and short or long maps
+/// never panic.
+#[test]
+fn every_bundled_model_decodes_its_fixed_points() {
+    for model_id in supported_models() {
+        let model = model_definition(model_id).unwrap();
+        let fixed = model.group.fixed_size();
+        let mut registers = vec![0u16; fixed];
+        registers[0] = model_id;
+        registers[1] = (fixed - 2) as u16;
+
+        let names: Vec<String> = decode_model(model_id, &registers)
+            .unwrap()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        let unique: std::collections::BTreeSet<&String> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "model {model_id} repeats a name");
+        for point in &model.group.points {
+            let omitted = matches!(point.kind, PointType::Pad | PointType::Sunssf)
+                || point.name == "ID"
+                || point.name == "L";
+            assert_eq!(
+                names.contains(&point.name),
+                !omitted,
+                "model {model_id} point {}",
+                point.name
+            );
+        }
+
+        // Repeat-to-fill groups take the extra registers; nothing else may break.
+        registers.resize(fixed + 200, 0);
+        let filled = decode_model(model_id, &registers).unwrap();
+        let unique: std::collections::BTreeSet<&String> =
+            filled.iter().map(|(name, _)| name).collect();
+        assert_eq!(
+            unique.len(),
+            filled.len(),
+            "model {model_id} with fill groups"
+        );
+        decode_model(model_id, &registers[..fixed / 2]).unwrap();
+    }
+}
+
+fn float(value: f32) -> [u16; 2] {
+    let bits = value.to_bits();
+    [(bits >> 16) as u16, bits as u16]
+}
+
+#[test]
+fn float_meters_decode_without_scale_factors() {
+    for model_id in [211, 212, 213, 214] {
+        let fixed = model_definition(model_id).unwrap().group.fixed_size();
+        let mut registers = model_registers(model_id, fixed as u16 - 2);
+        set(&mut registers, model_id, "W", &float(-1234.5));
+        set(&mut registers, model_id, "Hz", &float(50.0));
+        set(&mut registers, model_id, "A", &float(f32::NAN));
+
+        let points = points(model_id, &registers);
+
+        assert_eq!(points["W"], PointValue::Float(-1234.5), "model {model_id}");
+        assert_eq!(points["Hz"], PointValue::Float(50.0), "model {model_id}");
+        assert_eq!(points["A"], PointValue::Null, "model {model_id}: NaN");
+    }
 }
 
 #[test]

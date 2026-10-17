@@ -17,7 +17,8 @@ crates/
   discovery/       – CIDR subnet scan (TCP probe, bounded concurrency, per-host timeout) or static list
   modbus-client/   – Modbus TCP (tokio-modbus 0.17): reads split at 125 registers, retry with backoff,
                      lazy reconnect after transport errors/timeouts, hostname resolution
-  sunspec-parser/  – Bundled SunSpec JSON models (models/), decode_model(), model_name()
+  sunspec-parser/  – Every official SunSpec JSON model (models/, embedded by build.rs), decode_model(),
+                     model_name()
   poller-actor/    – Per-device lifecycle: run_device() supervision, discover_models(), polling,
                      stall detection, per-device metrics
   buffer/          – SQLite (sqlx, WAL) queue: enqueue_batch, dequeue_batch, delete_batch, retention

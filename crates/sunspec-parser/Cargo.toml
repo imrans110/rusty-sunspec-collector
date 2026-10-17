@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "SunSpec model parser for JSON, XML, and register maps"
+description = "Decodes SunSpec model registers using the official SunSpec model definitions"
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
