@@ -12,7 +12,7 @@ For configuration options see [Configuration](configuration.md). For deployment 
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Rust | 1.80+ (MSRV) | Compiler and cargo |
+| Rust | 1.88+ (MSRV) | Compiler and cargo |
 | cmake | 3.x+ | Building librdkafka (rdkafka-sys) |
 | pkg-config | any | Locating system libraries |
 | libssl-dev | 3.x+ | TLS support for Kafka |
@@ -156,7 +156,7 @@ Defined in `rustfmt.toml`: max width 100, auto-reordered imports/modules, editio
 
 ```
 rusty-sunspec-collector/
-  Cargo.toml              Workspace root (MSRV 1.80)
+  Cargo.toml              Workspace root (MSRV 1.88)
   Cargo.lock              Dependency lock (committed)
   Dockerfile              Multi-stage production build
   Cross.toml              ARM64 cross-compilation config
