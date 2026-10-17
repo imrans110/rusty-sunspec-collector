@@ -5,6 +5,13 @@
 Security fixes go into the latest release (currently 0.4.x) and `main`. Older versions are not
 patched.
 
+## Verifying releases
+
+From 0.5.0, the release archives, `install.sh`, `SHA256SUMS` and the GHCR images carry signed
+SLSA build provenance from the release workflow. Check them with
+`gh attestation verify <file or oci://image> --repo imrans110/rusty-sunspec-collector`; see
+[Verifying a release](docs/build.md#verifying-a-release).
+
 ## Reporting a vulnerability
 
 Report vulnerabilities privately, not in a public issue:

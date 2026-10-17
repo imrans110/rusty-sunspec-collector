@@ -290,12 +290,37 @@ Dockerfiles, `Cross.toml`, `scripts/` or the workflow, on manual dispatch, and o
 |-----|--------------|
 | Prepare | Lints `scripts/` with shellcheck; works out the version. On a tag it must equal the workspace version, point at a commit on `main`, and have a `CHANGELOG.md` section |
 | Build | Cross-compiles both targets; checks the ELF machine, that only glibc and `libgcc_s` are linked, and that no glibc symbol is newer than 2.18; packages the archives |
-| Assemble | Adds `install.sh` (with the version filled in), `SHA256SUMS` and the release notes; installs with `sudo sh install.sh` on the runner, starts the service under systemd against the simulator, checks it polls, and reinstalls to check the environment file is kept |
-| Image | Builds each image for `linux/amd64` and `linux/arm64` from the archived binaries and runs `--version` on both platforms (under QEMU for arm64) |
-| Publish | On a tag only: pushes the images and creates the GitHub Release |
+| Assemble | Adds `install.sh` (with the version filled in), `SHA256SUMS` and the release notes; installs with `sudo sh install.sh` on the runner, starts the service under systemd against the simulator, checks it polls, and reinstalls to check the environment file is kept. On a tag (and on a manual run) it attests the archives, `install.sh` and `SHA256SUMS`, writes the signed bundle as `sunspec-collector-<version>.intoto.jsonl` and verifies each file against it |
+| Image | Builds each image for `linux/amd64` and `linux/arm64` from the archived binaries and runs `--version` on both platforms (under QEMU for arm64). On a tag it pushes the image, attests it (the attestation is pushed to GHCR too) and verifies the attestation |
+| Publish | On a tag only: creates the GitHub Release with the archives, `install.sh`, `SHA256SUMS` and the provenance bundle |
 
 Every run except a tag push is a dry run: nothing is pushed or published. The archives and the
-release files are kept as the run's artifacts (`archive-<target>` and `release`).
+release files are kept as the run's artifacts (`archive-<target>` and `release`). A manual run
+(`gh workflow run release.yml --ref <branch>`) also attests its release files, to test the
+attestation steps; pull request and `main` dry runs skip them.
+
+### Verifying a release
+
+From 0.5.0, each release's archives, `install.sh` and `SHA256SUMS`, and both images, carry
+[SLSA build provenance](https://slsa.dev/spec/v1.0/provenance): a statement of the workflow run,
+commit and tag that built them, signed with a short-lived [Sigstore](https://www.sigstore.dev/)
+certificate issued to `release.yml` and recorded in Sigstore's public transparency log. GitHub
+artifact attestations are free for public repositories. To check a download with the
+[GitHub CLI](https://cli.github.com/):
+
+```sh
+gh attestation verify sunspec-collector-0.5.0-x86_64-unknown-linux-gnu.tar.gz \
+  --repo imrans110/rusty-sunspec-collector \
+  --signer-workflow imrans110/rusty-sunspec-collector/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.5.0
+gh attestation verify oci://ghcr.io/imrans110/sunspec-collector:0.5.0 \
+  --repo imrans110/rusty-sunspec-collector
+```
+
+`gh` finds the attestation by the file's or image's digest. The release also has the signed
+bundle, `sunspec-collector-<version>.intoto.jsonl`; `--bundle <file>` verifies against it instead
+of looking the attestation up on GitHub. Verifying `SHA256SUMS` once covers every archive it lists,
+so `install.sh`'s checksum check then ties the installed archive to the attested build.
 
 ### Cutting a release
 
