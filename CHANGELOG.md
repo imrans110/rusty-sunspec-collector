@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `sunspec-sim` crate: a SunSpec Modbus TCP simulator (library and `sunspec-sim` binary) with per-unit register maps and fault injection, used by the test suite
 - CI pipeline with fmt, clippy, build, and test (`.github/workflows/ci.yml`)
 - Dependabot configuration for Cargo and GitHub Actions
 - Docker healthcheck and non-root user
@@ -22,6 +23,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `CONTRIBUTING.md`
 
 ### Fixed
+- Kafka publishing failed at startup with the default `zstd` compression because librdkafka was built without zstd; rdkafka's `zstd` feature is now enabled
+- SIGTERM (sent by systemd and Docker on stop) now takes the graceful shutdown path instead of killing the process
+- Modbus client re-establishes the connection after transport errors and timeouts; Modbus exceptions no longer count as connection failures
+- Device hosts may be hostnames; every resolved address is tried in turn
 - Duplicate `PrometheusBuilder::new().install_recorder()` call (runtime crash)
 - Duplicate `kafka_topic` and `kafka_enable_idempotence` in `Default` impl (compile error)
 - Missing `discovery_unit_ids` field on `CollectorConfig` (compile error)
@@ -30,6 +35,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed unused `retry_count` column from buffer schema
 
 ### Changed
+- tokio-modbus 0.9 → 0.17
+- The Kafka integration test is `#[ignore]`d with instructions instead of silently passing without a broker; the `diagslave` test is replaced by simulator-backed client tests
 - Docker base images upgraded from `bullseye` to `bookworm`
 - Tokio features narrowed from `"full"` to specific features
 - Removed `#![allow(dead_code)]` from all 7 library crates

@@ -1,0 +1,11 @@
+[package]
+name = "sunspec-sim"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SunSpec Modbus TCP device simulator for tests and local development"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }

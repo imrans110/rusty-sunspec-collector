@@ -8,6 +8,7 @@ members = [
     "crates/discovery",
     "crates/buffer",
     "crates/types",
+    "crates/sunspec-sim",
 ]
 resolver = "2"
 
@@ -21,7 +22,7 @@ authors = ["Imran S."]
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "net", "time", "sync", "signal"] }
-tokio-modbus = "0.9"
+tokio-modbus = { version = "0.17", default-features = false, features = ["tcp"] }
 tracing = "0.1"
 thiserror = "1.0"
 anyhow = "1.0"
