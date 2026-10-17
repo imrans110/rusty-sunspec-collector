@@ -1,4 +1,4 @@
-# rusty-sunspec-collector
+![rusty-sunspec-collector: SunSpec telemetry from inverters, meters and batteries, decoded at the edge and sent to Kafka](docs/assets/social-preview.png)
 
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-1b1b1f?logo=rust)](https://www.rust-lang.org/) [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-0f766e)](#license) [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3b82f6)](https://imrans110.github.io/rusty-sunspec-collector/) [![CI](https://github.com/imrans110/rusty-sunspec-collector/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/imrans110/rusty-sunspec-collector/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/imrans110/rusty-sunspec-collector)](https://github.com/imrans110/rusty-sunspec-collector/releases/latest)
 

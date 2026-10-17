@@ -1,76 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
-  <!-- GitHub social preview (Settings → Social preview); render to PNG at 1280x640. -->
+  <!-- GitHub social preview and README banner (docs/assets/social-preview.png, 1280x640).
+       Render with a browser or Quick Look at 1280x640 and keep the PNG under 1 MB. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0b1220"/>
-      <stop offset="1" stop-color="#132238"/>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FAF8F3" stop-opacity="1"/>
+      <stop offset="1" stop-color="#FAF8F3" stop-opacity="0"/>
     </linearGradient>
-    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fbbf24"/>
-      <stop offset="1" stop-color="#f97316"/>
-    </linearGradient>
-    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
-    </marker>
+    <pattern id="cells" width="64" height="40" patternUnits="userSpaceOnUse">
+      <rect x="2" y="2" width="60" height="36" rx="3" fill="none" stroke="#D9DEE6" stroke-width="1.5"/>
+      <line x1="32" y1="2" x2="32" y2="38" stroke="#E6EAF0" stroke-width="1"/>
+    </pattern>
   </defs>
+  <rect width="1280" height="640" fill="#FAF8F3"/>
+  <rect x="560" y="0" width="720" height="640" fill="url(#cells)"/>
+  <rect x="560" y="0" width="420" height="640" fill="url(#fade)"/>
+  <rect x="0" y="0" width="1280" height="8" fill="#F59E0B"/>
 
-  <rect width="1280" height="640" fill="url(#bg)"/>
-
-  <!-- Sun mark -->
-  <g transform="translate(118 132)">
-    <circle r="34" fill="url(#sun)"/>
-    <g stroke="#fbbf24" stroke-width="6" stroke-linecap="round">
-      <line x1="0" y1="-50" x2="0" y2="-62"/>
-      <line x1="0" y1="50" x2="0" y2="62"/>
-      <line x1="-50" y1="0" x2="-62" y2="0"/>
-      <line x1="50" y1="0" x2="62" y2="0"/>
-      <line x1="35" y1="35" x2="44" y2="44"/>
-      <line x1="-35" y1="-35" x2="-44" y2="-44"/>
-      <line x1="35" y1="-35" x2="44" y2="-44"/>
-      <line x1="-35" y1="35" x2="-44" y2="44"/>
+  <g transform="translate(108 196)">
+    <circle r="26" fill="#F59E0B"/>
+    <g stroke="#F59E0B" stroke-width="5" stroke-linecap="round">
+      <line x1="0" y1="-38" x2="0" y2="-48"/><line x1="0" y1="38" x2="0" y2="48"/>
+      <line x1="-38" y1="0" x2="-48" y2="0"/><line x1="38" y1="0" x2="48" y2="0"/>
+      <line x1="27" y1="27" x2="34" y2="34"/><line x1="-27" y1="-27" x2="-34" y2="-34"/>
+      <line x1="27" y1="-27" x2="34" y2="-34"/><line x1="-27" y1="27" x2="-34" y2="34"/>
     </g>
   </g>
 
-  <text x="208" y="122" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
-        font-size="58" font-weight="700" fill="#f8fafc">rusty-sunspec-collector</text>
-  <text x="208" y="170" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
-        font-size="28" fill="#cbd5e1">SunSpec telemetry from the edge to Kafka, written in Rust</text>
-
-  <!-- Flow: devices → collector → Kafka -->
-  <g font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">
-    <rect x="80" y="252" width="300" height="150" rx="18" fill="#1e293b" stroke="#334155" stroke-width="2"/>
-    <text x="230" y="312" font-size="28" font-weight="600" fill="#f8fafc">Inverters, meters</text>
-    <text x="230" y="348" font-size="28" font-weight="600" fill="#f8fafc">and batteries</text>
-    <text x="230" y="382" font-size="20" fill="#94a3b8">SunSpec over Modbus TCP</text>
-
-    <line x1="388" y1="327" x2="462" y2="327" stroke="#94a3b8" stroke-width="4" marker-end="url(#arrow)"/>
-
-    <rect x="470" y="232" width="340" height="190" rx="18" fill="#1c2b45" stroke="#f59e0b" stroke-width="3"/>
-    <text x="640" y="282" font-size="30" font-weight="700" fill="#fbbf24">collector-app</text>
-    <text x="640" y="322" font-size="21" fill="#e2e8f0">discover model chain</text>
-    <text x="640" y="352" font-size="21" fill="#e2e8f0">decode with official models</text>
-    <text x="640" y="382" font-size="21" fill="#e2e8f0">buffer in SQLite</text>
-
-    <line x1="818" y1="327" x2="892" y2="327" stroke="#94a3b8" stroke-width="4" marker-end="url(#arrow)"/>
-
-    <rect x="900" y="252" width="300" height="150" rx="18" fill="#1e293b" stroke="#334155" stroke-width="2"/>
-    <text x="1050" y="312" font-size="28" font-weight="600" fill="#f8fafc">Kafka</text>
-    <text x="1050" y="348" font-size="20" fill="#94a3b8">Avro records</text>
-    <text x="1050" y="378" font-size="20" fill="#94a3b8">keyed by device</text>
+  <g font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <text x="80" y="310" font-size="72" font-weight="800" fill="#0F172A" letter-spacing="-1.5">rusty-sunspec-</text>
+    <text x="80" y="392" font-size="72" font-weight="800" fill="#0F172A" letter-spacing="-1.5">collector</text>
+    <text x="80" y="452" font-size="28" fill="#475569">SunSpec telemetry from inverters, meters and</text>
+    <text x="80" y="490" font-size="28" fill="#475569">batteries, decoded at the edge and sent to Kafka.</text>
+    <text x="80" y="574" font-size="21" font-weight="600" fill="#B45309">112 SunSpec models  ·  At-least-once delivery  ·  x86_64, ARM, Docker</text>
   </g>
-
-  <!-- Feature chips -->
-  <g font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" fill="#e2e8f0" text-anchor="middle">
-    <rect x="80" y="476" width="262" height="48" rx="24" fill="#1e293b" stroke="#334155"/>
-    <text x="211" y="508">At-least-once delivery</text>
-    <rect x="358" y="476" width="230" height="48" rx="24" fill="#1e293b" stroke="#334155"/>
-    <text x="473" y="508">IEEE 1547 models</text>
-    <rect x="604" y="476" width="276" height="48" rx="24" fill="#1e293b" stroke="#334155"/>
-    <text x="742" y="508">Prometheus and /healthz</text>
-    <rect x="896" y="476" width="304" height="48" rx="24" fill="#1e293b" stroke="#334155"/>
-    <text x="1048" y="508">x86_64, aarch64, Docker</text>
-  </g>
-
-  <text x="80" y="590" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="20" fill="#64748b">github.com/imrans110/rusty-sunspec-collector</text>
-  <text x="1200" y="590" text-anchor="end" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" fill="#64748b">MIT OR Apache-2.0</text>
 </svg>
