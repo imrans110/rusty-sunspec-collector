@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use apache_avro::{Schema, Writer};
+use apache_avro::{Codec, DeflateSettings, Schema, Writer};
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout;
@@ -94,7 +94,11 @@ impl Publisher {
     }
 
     pub fn serialize_batch<T: Serialize>(&self, values: &[T]) -> Result<Vec<u8>, PublishError> {
-        let mut writer = Writer::with_codec(&self.schema, Vec::new(), apache_avro::Codec::Deflate);
+        let mut writer = Writer::with_codec(
+            &self.schema,
+            Vec::new(),
+            Codec::Deflate(DeflateSettings::default()),
+        );
         for value in values {
             let avro_value = apache_avro::to_value(value)
                 .map_err(|err| PublishError::Encode(err.to_string()))?;
