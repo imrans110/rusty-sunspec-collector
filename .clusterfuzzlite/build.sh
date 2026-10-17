@@ -5,6 +5,8 @@
 targets="decode_model model_chain config"
 
 cd "$SRC/rusty-sunspec-collector"
+# Build against the workspace's locked versions; cargo adds the fuzz-only crates.
+cp Cargo.lock fuzz/Cargo.lock
 cargo fuzz build -O
 for target in $targets; do
   cp "fuzz/target/x86_64-unknown-linux-gnu/release/$target" "$OUT/"
