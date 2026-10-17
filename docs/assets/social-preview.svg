@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <!-- GitHub social preview (Settings → Social preview); render to PNG at 1280x640. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#132238"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbbf24"/>
+      <stop offset="1" stop-color="#f97316"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#bg)"/>
+
+  <!-- Sun mark -->
+  <g transform="translate(118 132)">
+    <circle r="34" fill="url(#sun)"/>
+    <g stroke="#fbbf24" stroke-width="6" stroke-linecap="round">
+      <line x1="0" y1="-50" x2="0" y2="-62"/>
+      <line x1="0" y1="50" x2="0" y2="62"/>
+      <line x1="-50" y1="0" x2="-62" y2="0"/>
+      <line x1="50" y1="0" x2="62" y2="0"/>
+      <line x1="35" y1="35" x2="44" y2="44"/>
+      <line x1="-35" y1="-35" x2="-44" y2="-44"/>
+      <line x1="35" y1="-35" x2="44" y2="-44"/>
+      <line x1="-35" y1="35" x2="-44" y2="44"/>
+    </g>
+  </g>
+
+  <text x="208" y="122" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="58" font-weight="700" fill="#f8fafc">rusty-sunspec-collector</text>
+  <text x="208" y="170" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="28" fill="#cbd5e1">SunSpec telemetry from the edge to Kafka, written in Rust</text>
+
+  <!-- Flow: devices → collector → Kafka -->
+  <g font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">
+    <rect x="80" y="252" width="300" height="150" rx="18" fill="#1e293b" stroke="#334155" stroke-width="2"/>
+    <text x="230" y="312" font-size="28" font-weight="600" fill="#f8fafc">Inverters, meters</text>
+    <text x="230" y="348" font-size="28" font-weight="600" fill="#f8fafc">and batteries</text>
+    <text x="230" y="382" font-size="20" fill="#94a3b8">SunSpec over Modbus TCP</text>
+
+    <line x1="388" y1="327" x2="462" y2="327" stroke="#94a3b8" stroke-width="4" marker-end="url(#arrow)"/>
+
+    <rect x="470" y="232" width="340" height="190" rx="18" fill="#1c2b45" stroke="#f59e0b" stroke-width="3"/>
+    <text x="640" y="282" font-size="30" font-weight="700" fill="#fbbf24">collector-app</text>
+    <text x="640" y="322" font-size="21" fill="#e2e8f0">discover model chain</text>
+    <text x="640" y="352" font-size="21" fill="#e2e8f0">decode with official models</text>
+    <text x="640" y="382" font-size="21" fill="#e2e8f0">buffer in SQLite</text>
+
+    <line x1="818" y1="327" x2="892" y2="327" stroke="#94a3b8" stroke-width="4" marker-end="url(#arrow)"/>
+
+    <rect x="900" y="252" width="300" height="150" rx="18" fill="#1e293b" stroke="#334155" stroke-width="2"/>
+    <text x="1050" y="312" font-size="28" font-weight="600" fill="#f8fafc">Kafka</text>
+    <text x="1050" y="348" font-size="20" fill="#94a3b8">Avro records</text>
+    <text x="1050" y="378" font-size="20" fill="#94a3b8">keyed by device</text>
+  </g>
+
+  <!-- Feature chips -->
+  <g font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" fill="#e2e8f0" text-anchor="middle">
+    <rect x="80" y="476" width="262" height="48" rx="24" fill="#1e293b" stroke="#334155"/>
+    <text x="211" y="508">At-least-once delivery</text>
+    <rect x="358" y="476" width="230" height="48" rx="24" fill="#1e293b" stroke="#334155"/>
+    <text x="473" y="508">IEEE 1547 models</text>
+    <rect x="604" y="476" width="276" height="48" rx="24" fill="#1e293b" stroke="#334155"/>
+    <text x="742" y="508">Prometheus and /healthz</text>
+    <rect x="896" y="476" width="304" height="48" rx="24" fill="#1e293b" stroke="#334155"/>
+    <text x="1048" y="508">x86_64, aarch64, Docker</text>
+  </g>
+
+  <text x="80" y="590" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="20" fill="#64748b">github.com/imrans110/rusty-sunspec-collector</text>
+  <text x="1200" y="590" text-anchor="end" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" fill="#64748b">MIT OR Apache-2.0</text>
+</svg>

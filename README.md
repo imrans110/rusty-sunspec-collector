@@ -1,6 +1,6 @@
 # rusty-sunspec-collector
 
-[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-1b1b1f?logo=rust)](https://www.rust-lang.org/) [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-0f766e)](#license) [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3b82f6)](https://imrans110.github.io/rusty-sunspec-collector/) [![CI](https://github.com/imrans110/rusty-sunspec-collector/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/imrans110/rusty-sunspec-collector/actions/workflows/ci.yml)
+[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-1b1b1f?logo=rust)](https://www.rust-lang.org/) [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-0f766e)](#license) [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3b82f6)](https://imrans110.github.io/rusty-sunspec-collector/) [![CI](https://github.com/imrans110/rusty-sunspec-collector/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/imrans110/rusty-sunspec-collector/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/imrans110/rusty-sunspec-collector)](https://github.com/imrans110/rusty-sunspec-collector/releases/latest)
 
 An edge service, written in Rust, that finds SunSpec devices (inverters, meters, batteries) on
 Modbus TCP, walks each device's SunSpec model chain, polls every model on a fixed schedule, and
@@ -288,6 +288,31 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `ma
 A separate workflow cross-compiles the aarch64 binary on pushes to `main` and when the cross
 build files change. See [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) for details.
 
+## How this compares
+
+| Project | Kind | SunSpec handling | Transports | Outputs | Writes to devices |
+|---|---|---|---|---|---|
+| **rusty-sunspec-collector** | Edge service (Rust) | Walks the model chain; decodes with the official SunSpec JSON models (scale factors, sentinels, repeating groups) | Modbus TCP | Kafka (Avro records keyed by device), Prometheus metrics | No |
+| [mbmd](https://github.com/volkszaehler/mbmd) | Daemon (Go) | Model discovery via gosunspec; maps a fixed set of inverter, meter and MPPT models to its own measurement names | Modbus TCP, RTU, RTU over TCP | MQTT, InfluxDB, REST, WebSocket, web UI | No |
+| [pysunspec2](https://github.com/sunspec/pysunspec2) | Library (Python), from the SunSpec Alliance | All models; scans 0, 40000 and 50000 and walks the chain | Modbus TCP, RTU | None (Python objects) | Yes |
+| [evcc](https://github.com/evcc-io/evcc) | EV charging and home energy manager (Go) | SunSpec device templates via gosunspec | Modbus TCP, RTU | InfluxDB, MQTT, REST | Yes (curtailment, battery control) |
+| [Telegraf `inputs.modbus`](https://github.com/influxdata/telegraf/tree/master/plugins/inputs/modbus) | Agent plugin (Go) | None: registers, types and fixed scales are mapped by hand | Modbus TCP, RTU, ASCII | Any Telegraf output, including Kafka (no Avro serializer) | No |
+| [sunspec](https://crates.io/crates/sunspec) crate | Library (Rust) | Model discovery; typed models generated from the official JSON | Modbus TCP (optionally TLS), RTU | None | Yes |
+
+When to use which:
+
+- **This project** fits fleets of gateways that feed a Kafka-based data platform: decoded,
+  device-keyed records, a local buffer that rides out uplink outages, and metrics for operating
+  many edge nodes. It is read-only and Modbus TCP only (see [Limitations](#limitations)).
+- **mbmd** fits a single site that wants MQTT or InfluxDB and a web UI, and covers serial RS-485
+  meters.
+- **pysunspec2** and the **sunspec** crate are libraries for writing your own tool, including
+  control: pysunspec2 in Python, sunspec in Rust.
+- **evcc** is for solar-aware EV charging and home energy management rather than telemetry
+  collection.
+- **Telegraf** fits when you already run it and your devices are not SunSpec, or you are happy to
+  map registers by hand.
+
 ## Limitations
 
 - Kafka authentication is limited to SASL PLAIN and SCRAM (no Kerberos or OAuth), and rotated
@@ -309,7 +334,10 @@ listed under [Limitations](#limitations); changes are recorded in [CHANGELOG.md]
 ## Contributing
 
 Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the checks to
-run before opening a PR. Keep the `types` crate light (serde only) and avoid adding heavy
+run before opening a PR, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). If you run the collector
+against real hardware, a [device report](https://github.com/imrans110/rusty-sunspec-collector/issues/new?template=device_report.yml)
+(working or not) helps build the list of tested devices. Report security issues privately as
+described in [SECURITY.md](SECURITY.md). Keep the `types` crate light (serde only) and avoid adding heavy
 dependencies to shared crates.
 
 ## License

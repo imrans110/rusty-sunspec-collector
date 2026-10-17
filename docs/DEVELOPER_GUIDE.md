@@ -59,6 +59,8 @@ rusty-sunspec-collector/
   Cargo.toml              Workspace root (members, MSRV 1.88, shared dependencies)
   Cargo.lock              Committed; CI and Docker builds use --locked
   CHANGELOG.md            Keep a Changelog format
+  CODE_OF_CONDUCT.md      Contributor Covenant 2.1
+  SECURITY.md             How to report vulnerabilities privately
   Dockerfile              Multi-target build: builder, runtime, simulator, collector
   docker-compose.yml      Kafka + simulator + collector + Prometheus
   Cross.toml              Maps the release targets to the custom cross images
@@ -68,6 +70,8 @@ rusty-sunspec-collector/
     workflows/release.yml     Release archives and images (dry run unless a v* tag)
     workflows/deploy-docs.yml mdBook -> GitHub Pages
     dependabot.yml            Weekly Cargo and GitHub Actions updates
+    ISSUE_TEMPLATE/           Issue forms: bug report, feature request, device report
+    pull_request_template.md  PR checklist
   crates/
     types/                Shared DTOs (serde only)
     discovery/            CIDR subnet scan

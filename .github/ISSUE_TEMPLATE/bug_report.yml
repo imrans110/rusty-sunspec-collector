@@ -1,0 +1,52 @@
+name: Bug report
+description: Something does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Remove passwords and other secrets from anything you paste.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `collector-app --version` (or the image tag / commit).
+      placeholder: collector-app 0.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is it installed?
+      options:
+        - Release archive or install.sh
+        - Docker image (ghcr.io)
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: device
+    attributes:
+      label: Device
+      description: Vendor, model, firmware, unit ID, and whether it is connected directly or through a gateway.
+      placeholder: Inverter vendor and model, firmware, unit 126, direct Modbus TCP
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: The relevant parts of your config file or SUNSPEC_* variables, with secrets removed.
+      render: toml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Log lines around the problem (`journalctl -u sunspec-collector`, `docker logs`). `RUST_LOG=info,poller_actor=debug` adds detail.
+      render: text

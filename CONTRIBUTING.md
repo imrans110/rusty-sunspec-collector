@@ -1,6 +1,14 @@
 # Contributing
 
-Thank you for your interest in contributing to Rusty SunSpec Collector.
+Thank you for your interest in contributing to Rusty SunSpec Collector. Everyone taking part is
+expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Issues
+
+Use the issue forms: **Bug report**, **Feature request**, or **Device report**. A device report
+says how the collector works with your inverter, meter or battery, and is useful whether or not it
+works: it builds the list of tested devices and shows which vendor quirks need handling. Report
+security problems privately as described in [SECURITY.md](SECURITY.md).
 
 ## Getting Started
 

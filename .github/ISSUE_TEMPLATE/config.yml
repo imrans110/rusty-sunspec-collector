@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://imrans110.github.io/rusty-sunspec-collector/
+    about: Configuration reference, operations guide and troubleshooting.
+  - name: Report a security vulnerability
+    url: https://github.com/imrans110/rusty-sunspec-collector/security/policy
+    about: Please report vulnerabilities privately, not in a public issue.
