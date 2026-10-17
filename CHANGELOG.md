@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-17
+
+### Upgrade notes
+- A static device listed twice (same host and unit ID) now fails config validation; remove the duplicate entry.
+- Records for models outside the 31 bundled in 0.2.0 (for example the float meters 211–214) now carry decoded `points` instead of an empty map. The schema is unchanged.
+- The example config (`docs/config.example.toml`) now reads models 1 and 120 hourly and 121 every 10 minutes; remove `[poller.model_intervals_s]` from a copied config to read them every cycle.
+
 ### Added
 - Every official SunSpec model definition is bundled: 112 models from github.com/sunspec/models (commit `90b4a331`), up from 31. Newly decoded: network and security models (2–19), IEEE 1547-2003 era controls (125–145), float meters (211–214) and secure meter readings (220), environmental sensors (302–308), string combiners (401–404), solar modules (501–502), tracker (601), DER DC measurement and control (714–715), storage and lithium-ion/flow batteries (801, 803–809), and the test and vendor models in the official repository. The release binary grows by about 1 MB
 - Community files: `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md`, issue forms (bug report, feature request, device report) and a pull request template; a social preview image (`docs/assets/social-preview.svg` and `.png`)
