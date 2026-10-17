@@ -16,3 +16,6 @@ metrics = "0.22"
 modbus-client = { path = "../modbus-client" }
 sunspec-parser = { path = "../sunspec-parser" }
 types = { path = "../types" }
+
+[dev-dependencies]
+sunspec-sim = { path = "../sunspec-sim" }
