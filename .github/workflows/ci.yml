@@ -1,19 +1,71 @@
 name: CI
 
 # Runs on every change: these checks are required for merging into main, and a
-# required check that is skipped by a path filter would block the PR forever.
+# required check that a workflow-level path filter skips never reports, which blocks the
+# PR forever. Instead, the Changes job looks at what a PR touches, and the jobs below
+# are skipped with `if:` when it touches no code; GitHub counts a skipped job as passing.
+# Pushes to main always run everything.
 on:
   push:
     branches: ["main"]
   pull_request:
+
+# A new push to a PR cancels the run it supersedes; runs on main are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      deps: ${{ steps.filter.outputs.deps }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Classify the changed files
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "not a pull request: run everything"
+            { echo "code=true"; echo "deps=true"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=false
+          deps=false
+          while IFS= read -r file; do
+            echo "changed: $file"
+            case "$file" in
+              # Anything compiled, tested or built into images. The three docs files
+              # are read by tests (config examples and the shipped config and env file).
+              crates/* | Cargo.toml | Cargo.lock | rustfmt.toml | Cross.toml | \
+              Dockerfile | .dockerignore | docker/* | docker-compose.yml | fixtures/* | \
+              .github/workflows/ci.yml | \
+              docs/configuration.md | docs/config.example.toml | docs/sunspec-collector.env)
+                code=true ;;
+            esac
+            case "$file" in
+              Cargo.toml | Cargo.lock | crates/*/Cargo.toml | .github/workflows/ci.yml) deps=true ;;
+            esac
+          done <<< "$(git diff --name-only "$BASE" HEAD)"
+          echo "code=$code, deps=$deps"
+          { echo "code=$code"; echo "deps=$deps"; } >> "$GITHUB_OUTPUT"
+
   check:
     name: Check & Lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -40,6 +92,8 @@ jobs:
 
   test:
     name: Test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -56,20 +110,26 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+  # Advisories also appear for unchanged dependencies; audit.yml checks main daily.
   audit:
     name: Security Audit
+    needs: changes
+    if: needs.changes.outputs.deps == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
 
       - name: Run audit
         run: cargo audit
 
   docker-e2e:
     name: Docker E2E
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

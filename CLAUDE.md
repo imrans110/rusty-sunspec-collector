@@ -61,6 +61,13 @@ exit (code 0, "collector stopped" logged). `release.yml` cross-compiles x86_64 a
 systemd and builds multi-arch images; it publishes only on a `v*` tag (never push tags without
 the owner's approval).
 
+On pull requests, a `Changes` job gates the jobs: Check & Lint, Test and Docker E2E run only
+when code changed (crates, Cargo files, Docker files, compose, `fixtures/`, `ci.yml`, or the docs
+files tests read: `docs/configuration.md`, `docs/config.example.toml`,
+`docs/sunspec-collector.env`); Security Audit only when a `Cargo.toml`, `Cargo.lock` or `ci.yml`
+changed. Skipped required jobs count as passing. Keep the list in `ci.yml` in step when tests or
+the image start reading another file. `audit.yml` audits `main` daily.
+
 ## Conventions
 
 - **Error handling**: Library crates use `thiserror`; `collector-app` uses `anyhow`.

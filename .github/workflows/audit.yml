@@ -1,0 +1,26 @@
+name: Security Audit (daily)
+
+# RustSec advisories are published for dependencies that have not changed, so the
+# dependency audit also runs daily on main, not only when a PR changes Cargo.lock.
+# A failed scheduled run is emailed to whoever last changed this schedule.
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Run audit
+        run: cargo audit
