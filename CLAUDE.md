@@ -56,7 +56,9 @@ cargo audit
 Plus the **Docker E2E** job in `.github/workflows/ci.yml`: builds the `simulator` and `collector`
 images, runs kafka + simulator + collector with compose, waits for `/healthz`, checks records are
 keyed `simulator/1` and `simulator/2`, runs the ignored Kafka tests, and checks a clean SIGTERM
-exit (code 0, "collector stopped" logged). `cross-arm64.yml` builds the aarch64 binary.
+exit (code 0, "collector stopped" logged). `release.yml` cross-compiles x86_64 and aarch64 archives, tests `scripts/install.sh` under
+systemd and builds multi-arch images; it publishes only on a `v*` tag (never push tags without
+the owner's approval).
 
 ## Conventions
 

@@ -9,6 +9,13 @@ const USAGE: &str =
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    if env::args()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-V")
+    {
+        println!("sunspec-sim {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     let config = match parse_args() {
         Ok(config) => config,
         Err(message) => {

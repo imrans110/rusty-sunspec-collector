@@ -73,8 +73,9 @@ CI also runs a Docker end-to-end job (`.github/workflows/ci.yml`): it builds the
 `/healthz`, checks that records reach Kafka keyed per device and decode, runs the ignored Kafka
 tests, and checks that the collector exits 0 on SIGTERM. If your change touches the Dockerfile,
 `docker-compose.yml`, the record format or shutdown, run the Compose steps above locally as well.
-Changes to `docker/Dockerfile.arm64` or `Cross.toml` also trigger the aarch64 cross-compile
-workflow.
+Changes to the Dockerfiles, `Cross.toml` or `scripts/` also trigger a dry run of the release
+workflow, which cross-compiles both release targets, tests `install.sh` under systemd and builds
+the multi-arch images without publishing them.
 
 ## Commits and Pull Requests
 
@@ -85,6 +86,11 @@ workflow.
 - Update the documentation in `docs/` and the `[Unreleased]` section of `CHANGELOG.md` when you
   change behaviour, configuration, metrics or the Kafka record format. Mark breaking changes.
 - All CI checks must pass before a PR is merged.
+
+## Cutting a release
+
+Releases are published by pushing a `v*` tag; the steps (version bump, CHANGELOG, tag) are in
+[docs/build.md](docs/build.md#cutting-a-release).
 
 ## Conventions
 

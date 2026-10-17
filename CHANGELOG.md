@@ -10,14 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Kafka consumers must switch to the v2 record format (one Avro single-object record per sample, keyed by device); see `crates/avro-kafka/schemas/sunspec_sample.avsc` and `docs/ops.md`. Rows buffered by an older version are published with empty `points`, so let the old version drain its buffer before upgrading if possible.
 - Docker: the default buffer file is now `/app/data/sunspec-buffer.sqlite` (previously `/app/data/buffer.sqlite` via the image's `SUNSPEC_BUFFER_PATH`). To keep using an existing volume's unsent rows, set `SUNSPEC_BUFFER_PATH=/app/data/buffer.sqlite` (or `buffer.path`).
 - Config is strict and several metric names changed; see `docs/ops.md` for the rename table and `docs/configuration.md` for deprecated keys.
+- Docker: the collector image's `/app/collector-app` is now the `ENTRYPOINT`, so arguments after the image name go to the collector (`docker run sunspec-collector --config /app/collector.toml`) instead of replacing the command.
 
 ### Added
+- Release pipeline (`.github/workflows/release.yml`): portable x86_64 and aarch64 Linux archives (glibc 2.18+, OpenSSL linked statically) with the binaries, systemd unit, environment file, example config and licenses; `SHA256SUMS`; an `install.sh` that verifies and installs a release (`curl -fsSL …/releases/latest/download/install.sh | sudo sh`) and keeps an existing `/etc/sunspec-collector.env`; multi-arch `ghcr.io/imrans110/sunspec-collector` and `sunspec-simulator` images built from the same binaries; GitHub Release notes from this file. Every push to `main` runs it as a dry run, which installs the archive under systemd and smoke-tests both image platforms; a `v*` tag publishes
+- `collector-app --version` and `--help`, and `sunspec-sim --version`
 - Kafka connection security: TLS (`ssl`), mutual TLS, and SASL `PLAIN` / `SCRAM-SHA-256` / `SCRAM-SHA-512` (`sasl_plaintext`, `sasl_ssl`) via new `kafka.security_protocol`, `kafka.ssl_*` and `kafka.sasl_*` settings (and `SUNSPEC_KAFKA_*` variables). Passwords can be read from files (`*_password_file`) for Docker secrets and systemd credentials, are redacted in debug output, and mismatched settings (e.g. `sasl_*` with `plaintext`) fail validation. The compose stack now publishes over SASL/PLAIN with a Docker secret, which the CI Docker E2E job exercises
 - IEEE 1547-2018 DER models 701–713 (AC measurements, capacity, enter service, AC controls, volt-var, volt-watt, voltage/frequency trip curves, frequency droop, watt-var, storage capacity) bundled from the same pinned `sunspec/models` commit
 - `vendored-openssl` cargo feature (collector-app, avro-kafka): builds OpenSSL from source and links it statically; used by the aarch64 cross build so the binary does not depend on the target's OpenSSL
 - Docs: `docs/build.md` (building, Docker images, cross-compiling) and `docs/buffer_maintenance.md` (buffer semantics, retention, sizing, inspection); the October 2026 audit is recorded in `docs/CODE_REVIEW.md`
 - CI `Docker E2E` job: builds the images, runs Kafka + simulator + collector with docker compose, waits for `/healthz`, checks records are keyed per device, decodes the published records with the Rust consumer test, and verifies a clean SIGTERM stop
-- `Cross-compile (aarch64)` workflow building the ARM64 release binary with `cross`
 - `simulator` Docker target and compose service (two units behind one gateway), so `docker compose up --build` produces data without hardware
 - `/healthz` endpoint: 200 while ingest and the uplink are checking in, 503 otherwise, with JSON detail (`devices_up`, `devices_total`, heartbeat ages); the systemd watchdog is pinged only while healthy
 - `SUNSPEC_LOG_FORMAT=json` for one JSON object per log line; `RUST_LOG` filtering is explicit
@@ -72,12 +74,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed unused `retry_count` column from buffer schema
 
 ### Changed
+- All crates take their version from `[workspace.package]` in `Cargo.toml`, so a release bumps one line
 - Config validation rejects `kafka.acks` `0`/`1` while `kafka.enable_idempotence` is true (librdkafka refused to start) and `modbus.max_batch_size` above 125 (previously clamped silently)
 - `modbus.timeout_ms` / `SUNSPEC_MODBUS_TIMEOUT_MS` are deprecated and ignored with a warning: device sessions always used `poller.request_timeout_ms`, so the setting had no effect
 - README and docs rewritten against the code: removed claims that were not true ("zero data loss", "90%+" overhead reduction, "zombie poller detection", graceful SIGTERM before it existed) and dead links
 - CI runs on every push to main and every pull request (no path filters), so its checks can be required for merging
 - The systemd unit runs as a dynamic unprivileged user with `StateDirectory=sunspec-collector` (it ran as root), allows 30 s for the graceful stop, and adds further sandboxing
-- Docker `HEALTHCHECK` uses `/healthz`; images run as a non-root user; `docker/Dockerfile.arm64` drops the unused `librdkafka-dev` and `libsqlite3-dev` packages
+- Docker `HEALTHCHECK` uses `/healthz`; images run as a non-root user; the cross-compilation image (now `docker/Dockerfile.cross`) drops the unused `librdkafka-dev` and `libsqlite3-dev` packages
 - **Breaking:** config is strict. Unknown keys in the config file, unparsable `SUNSPEC_*` values (the error names the variable), invalid static devices (e.g. unit 300) and unsupported `kafka.compression` / `kafka.acks` values fail at startup instead of silently falling back to defaults
 - **Breaking:** metrics renamed to the `sunspec_` prefix with base units and `_total` counters: `sunspec_buffer_writes_total`, `sunspec_uplink_records_total`, `sunspec_uplink_errors_total`, `sunspec_uplink_publish_seconds`; the high-cardinality `batch_size` label is gone
 - Logs use ANSI colours only on a terminal; per-host discovery timeouts log at debug instead of warn

@@ -1,7 +1,7 @@
 # Building and Packaging
 
-How to build the collector natively, as Docker images and for 64-bit ARM, and how to run the
-resulting binary. For the development workflow (tests, CI, the simulator) see the
+How to build the collector natively, as Docker images and as portable release binaries for x86_64
+and 64-bit ARM, how releases are published, and how to run the resulting binary. For the development workflow (tests, CI, the simulator) see the
 [Developer Guide](DEVELOPER_GUIDE.md); for deploying with systemd see [Operations](ops.md).
 
 ---
@@ -18,7 +18,7 @@ The workspace produces two binaries:
 |-------|---------|--------|
 | Debug | `cargo build --workspace` | `target/debug/collector-app`, `target/debug/sunspec-sim` |
 | Release | `cargo build --release --locked -p collector-app -p sunspec-sim` | `target/release/collector-app`, `target/release/sunspec-sim` |
-| aarch64 release | `cross build --release --locked --target aarch64-unknown-linux-gnu -p collector-app --features vendored-openssl` | `target/aarch64-unknown-linux-gnu/release/collector-app` |
+| Portable release (x86_64 or aarch64) | `cross build --release --locked --target <target> -p collector-app -p sunspec-sim --features collector-app/vendored-openssl` | `target/<target>/release/collector-app`, `target/<target>/release/sunspec-sim` |
 | Collector image | `docker build -t sunspec-collector .` | `/app/collector-app` in the image |
 | Simulator image | `docker build --target simulator -t sunspec-simulator .` | `/app/sunspec-sim` in the image |
 
@@ -90,7 +90,7 @@ does not depend on the OpenSSL of the machine it runs on. Building OpenSSL needs
 cargo build --release --locked -p collector-app --features vendored-openssl
 ```
 
-The aarch64 cross build uses it; native and Docker builds do not.
+The release builds use it; native and Docker builds do not.
 
 ---
 
@@ -110,14 +110,15 @@ system with `ldd target/release/collector-app`. To install it, copy the binary, 
 
 ## Docker images
 
-The `Dockerfile` has four stages:
+The `Dockerfile` has these stages:
 
 | Stage | Base | Contents |
 |-------|------|----------|
 | `builder` | `rust:1.88-slim-bookworm` | Installs cmake, build-essential, libssl-dev, libcurl4-openssl-dev, pkg-config and python3, then runs `cargo build --release --locked -p collector-app -p sunspec-sim` and copies both binaries to `/out` |
+| `prebuilt` | `scratch` | Only with `--build-arg BINARIES=prebuilt`: copies `dist/bin/<arch>/collector-app` and `sunspec-sim` to `/out` instead of compiling (see [Release images](#release-images)) |
 | `runtime` | `debian:bookworm-slim` | Installs ca-certificates, libssl3 and curl (for the health check) and creates the system user and group `collector` |
 | `simulator` | `runtime` | `/app/sunspec-sim`, runs as `collector`, exposes 1502, `ENTRYPOINT ["/app/sunspec-sim"]` with default arguments `--bind 0.0.0.0:1502 --units 1` |
-| `collector` | `runtime` | `/app/collector-app`, runs as `collector` with working directory `/app/data` (owned by `collector`), exposes 9090, a `HEALTHCHECK` on `/healthz`; the default target |
+| `collector` | `runtime` | `/app/collector-app`, runs as `collector` with working directory `/app/data` (owned by `collector`), exposes 9090, a `HEALTHCHECK` on `/healthz`, `ENTRYPOINT ["/app/collector-app"]`; the default target |
 
 ```sh
 docker build -t sunspec-collector .                         # collector (default target)
@@ -159,12 +160,12 @@ docker run -d --name sunspec-collector \
   stored the buffer under that name. To keep sending rows already buffered in an existing volume,
   set `SUNSPEC_BUFFER_PATH=/app/data/buffer.sqlite` (or move the file and its `-wal` and `-shm`
   files to `sunspec-buffer.sqlite` while the collector is stopped).
-- **Config file.** Mount it and set `SUNSPEC_CONFIG`, or override the command, which is
-  `/app/collector-app` (a `CMD`, not an `ENTRYPOINT`):
+- **Config file.** Mount it and set `SUNSPEC_CONFIG`, or pass `--config`: the image's entrypoint
+  is `/app/collector-app`, so arguments after the image name go to the collector:
 
   ```sh
   docker run -d -v "$PWD/collector.toml:/app/collector.toml:ro" -v sunspec-data:/app/data \
-    -p 9090:9090 sunspec-collector /app/collector-app --config /app/collector.toml
+    -p 9090:9090 sunspec-collector --config /app/collector.toml
   ```
 
 - **Environment files.** With `--env-file`, put comments on their own lines: Docker does not strip
@@ -176,8 +177,8 @@ docker run -d --name sunspec-collector \
 - **Stopping.** `docker stop` sends SIGTERM, which starts the graceful shutdown (pollers stop, queued
   samples are written, the uplink drains for up to `buffer.shutdown_drain_timeout_ms`). Docker sends
   SIGKILL after 10 s by default; `docker stop -t 30` matches the 30 s the systemd unit allows.
-- **Schema.** `docker run --rm sunspec-collector /app/collector-app --print-schema` prints the Avro
-  schema of the published records.
+- **Schema and version.** `docker run --rm sunspec-collector --print-schema` prints the Avro schema
+  of the published records, and `--version` the collector version.
 
 ### Running the simulator image
 
@@ -220,38 +221,94 @@ Kafka data. `docker compose stop` gives containers 10 s before killing them; use
 
 ---
 
-## Cross-compiling for aarch64
+## Release builds
 
-64-bit ARM gateways (`aarch64-unknown-linux-gnu`) are built with
-[`cross`](https://github.com/cross-rs/cross) and a custom image:
+Release binaries are built with [`cross`](https://github.com/cross-rs/cross) for
+`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, in images derived from the cross-rs
+0.2.5 images (Ubuntu 16.04). They need glibc 2.18 or newer and link nothing else that a target
+system might lack: OpenSSL is vendored, librdkafka, SQLite, zstd and zlib are compiled in, and the
+only shared libraries are glibc's and `libgcc_s`.
 
 ```sh
 cargo install cross --locked
-docker build -t sunspec-cross-arm64 -f docker/Dockerfile.arm64 .
-cross build --release --locked --target aarch64-unknown-linux-gnu -p collector-app \
-  --features vendored-openssl
-file target/aarch64-unknown-linux-gnu/release/collector-app    # "ARM aarch64"
+target=aarch64-unknown-linux-gnu      # or x86_64-unknown-linux-gnu (DEB_ARCH=amd64, MULTIARCH=x86_64-linux-gnu)
+docker build -t "sunspec-cross-$target" -f docker/Dockerfile.cross \
+  --build-arg TARGET=$target --build-arg DEB_ARCH=arm64 --build-arg MULTIARCH=aarch64-linux-gnu docker
+cross build --release --locked --target $target -p collector-app -p sunspec-sim \
+  --features collector-app/vendored-openssl
+readelf -d target/$target/release/collector-app | grep NEEDED    # glibc and libgcc_s only
 ```
 
-- `Cross.toml` maps the target to the image: `[target.aarch64-unknown-linux-gnu]`,
-  `image = "sunspec-cross-arm64"`. The image must be built locally under that tag first.
-- `docker/Dockerfile.arm64` starts from `ghcr.io/cross-rs/aarch64-unknown-linux-gnu:latest`, adds
-  the `arm64` architecture, installs `cmake`, `make`, `perl`, `pkg-config` and
-  `libcurl4-openssl-dev:arm64` (the curl headers librdkafka needs at compile time), and points
-  `PKG_CONFIG_LIBDIR` and `PKG_CONFIG_PATH` at `/usr/lib/aarch64-linux-gnu/pkgconfig`.
-- `--features vendored-openssl` is required: the image's arm64 OpenSSL is older than the version
-  librdkafka 2.12 needs, and linking against it fails. With the feature, OpenSSL is compiled from
-  source (hence `make` and `perl`) and linked statically, which also makes the binary independent
-  of the target system's OpenSSL.
-- The binary is still linked dynamically against the target's C library; check it with `ldd` on
-  the device.
+- `Cross.toml` maps each target to the image tag `sunspec-cross-<target>`; build the image under
+  that tag first.
+- `docker/Dockerfile.cross` starts from `ghcr.io/cross-rs/<target>:0.2.5`, adds the target's
+  Debian architecture if it is not the image's own, installs `cmake`, `make`, `perl`, `pkg-config`
+  and `libcurl4-openssl-dev` for the target (the curl headers librdkafka needs at compile time),
+  and points `PKG_CONFIG_LIBDIR` and `PKG_CONFIG_PATH` at the target's multiarch directory.
+- `--features collector-app/vendored-openssl` is required: the images' OpenSSL is older than the
+  version librdkafka 2.12 needs. OpenSSL is compiled from source (hence `make` and `perl`).
 
-### CI workflow
+### Archives
 
-`.github/workflows/cross-arm64.yml` runs the same steps on pushes to `main`, on pull requests that
-change `docker/Dockerfile.arm64`, `Cross.toml` or the workflow, and on manual dispatch. It checks
-with `file` that the result is an aarch64 binary and uploads it as the artifact
-`collector-app-aarch64-unknown-linux-gnu`.
+`scripts/package-release.sh <version> <target> <bin-dir>` writes
+`dist/sunspec-collector-<version>-<target>.tar.gz`, one directory holding `collector-app`,
+`sunspec-sim`, `README.md`, `CHANGELOG.md`, `LICENSE-MIT`, `LICENSE-APACHE`,
+`LICENSE-SUNSPEC-MODELS` (the bundled model definitions), `config.example.toml`,
+`sunspec-collector.env` and `sunspec-collector.service`. It also copies the binaries to
+`dist/bin/<amd64|arm64>/` for the release images.
+
+`scripts/install.sh` installs an archive on a Linux machine; see
+[Operations](ops.md#from-a-release). Its `SUNSPEC_ROOT`, `SUNSPEC_TARGET` and `SUNSPEC_BASE_URL`
+variables install under another directory, for another target, or from local files, which is how
+CI tests it.
+
+### Release images
+
+`docker build --build-arg BINARIES=prebuilt` packages the binaries in `dist/bin/<arch>/` instead
+of compiling them, so a multi-arch image needs no compilation under emulation:
+
+```sh
+docker buildx build --platform linux/amd64,linux/arm64 --build-arg BINARIES=prebuilt \
+  --target collector -t sunspec-collector .
+```
+
+The published images are `ghcr.io/imrans110/sunspec-collector` and
+`ghcr.io/imrans110/sunspec-simulator`, tagged with the version (`0.2.0`), the minor series
+(`0.2`), `latest` for the newest non-prerelease, and `sha-<commit>`.
+
+### Release workflow
+
+`.github/workflows/release.yml` runs on pushes to `main`, on pull requests that change the
+Dockerfiles, `Cross.toml`, `scripts/` or the workflow, on manual dispatch, and on `v*` tags:
+
+| Job | What it does |
+|-----|--------------|
+| Prepare | Lints `scripts/` with shellcheck; works out the version. On a tag it must equal the workspace version, point at a commit on `main`, and have a `CHANGELOG.md` section |
+| Build | Cross-compiles both targets; checks the ELF machine, that only glibc and `libgcc_s` are linked, and that no glibc symbol is newer than 2.18; packages the archives |
+| Assemble | Adds `install.sh` (with the version filled in), `SHA256SUMS` and the release notes; installs with `sudo sh install.sh` on the runner, starts the service under systemd against the simulator, checks it polls, and reinstalls to check the environment file is kept |
+| Image | Builds each image for `linux/amd64` and `linux/arm64` from the archived binaries and runs `--version` on both platforms (under QEMU for arm64) |
+| Publish | On a tag only: pushes the images and creates the GitHub Release |
+
+Every run except a tag push is a dry run: nothing is pushed or published. The archives and the
+release files are kept as the run's artifacts (`archive-<target>` and `release`).
+
+### Cutting a release
+
+1. Pick the version (the Kafka record format and the metric names are part of the public
+   interface, so changing them needs a new minor version before 1.0).
+2. In a pull request, set `version` under `[workspace.package]` in `Cargo.toml`, run
+   `cargo check` so `Cargo.lock` follows, and rename `## [Unreleased]` in `CHANGELOG.md` to
+   `## [<version>] - <date>` with a new empty `## [Unreleased]` above it.
+3. After it merges, tag the merge commit on `main` and push the tag:
+
+   ```sh
+   git switch main && git pull
+   git tag -a v0.2.0 -m "v0.2.0"
+   git push origin v0.2.0
+   ```
+
+4. The workflow publishes the images and the release. After the first release, make both GHCR
+   packages public (package settings, "Change visibility"), since new packages start private.
 
 ---
 

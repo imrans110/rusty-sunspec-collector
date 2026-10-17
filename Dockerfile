@@ -1,5 +1,10 @@
 # syntax=docker/dockerfile:1
 
+# Where the images get their binaries: `builder` compiles them from source (the default);
+# `prebuilt` copies release binaries from dist/bin/<arch>/, which is how the release
+# workflow packages the binaries it cross-compiled instead of compiling under emulation.
+ARG BINARIES=builder
+
 # Build stage: compiles the collector and the device simulator.
 FROM rust:1.88-slim-bookworm AS builder
 
@@ -24,6 +29,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && mkdir -p /out \
     && cp target/release/collector-app target/release/sunspec-sim /out/
 
+FROM scratch AS prebuilt
+ARG TARGETARCH
+COPY dist/bin/${TARGETARCH}/collector-app dist/bin/${TARGETARCH}/sunspec-sim /out/
+
+FROM ${BINARIES} AS binaries
+
 # Shared runtime base.
 FROM debian:bookworm-slim AS runtime
 
@@ -40,7 +51,7 @@ WORKDIR /app
 
 # Simulated SunSpec inverters for local development and end-to-end tests.
 FROM runtime AS simulator
-COPY --from=builder /out/sunspec-sim /app/sunspec-sim
+COPY --from=binaries /out/sunspec-sim /app/sunspec-sim
 USER collector:collector
 EXPOSE 1502
 ENTRYPOINT ["/app/sunspec-sim"]
@@ -50,10 +61,10 @@ CMD ["--bind", "0.0.0.0:1502", "--units", "1"]
 # default relative buffer path lands there; buffer.path in a config file still applies.
 FROM runtime AS collector
 RUN mkdir -p /app/data && chown collector:collector /app/data
-COPY --from=builder /out/collector-app /app/collector-app
+COPY --from=binaries /out/collector-app /app/collector-app
 USER collector:collector
 WORKDIR /app/data
 EXPOSE 9090
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
     CMD curl -fsS "http://localhost:${SUNSPEC_METRICS_PORT:-9090}/healthz" || exit 1
-CMD ["/app/collector-app"]
+ENTRYPOINT ["/app/collector-app"]
