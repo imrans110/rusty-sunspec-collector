@@ -32,3 +32,67 @@ async fn publishes_keyed_records_to_kafka() {
         result.expect("delivered");
     }
 }
+
+/// Run by the CI Docker E2E job after the compose stack (simulator → collector →
+/// Kafka) has published records: everything on the topic must decode, carry the
+/// expected headers, be keyed by its device, and include decoded inverter power.
+#[tokio::test]
+#[ignore = "needs a broker a running collector publishes to (CI Docker E2E job)"]
+async fn published_records_decode_to_samples() {
+    use std::time::{Duration, Instant};
+
+    use rdkafka::consumer::{Consumer, StreamConsumer};
+    use rdkafka::message::Headers;
+    use rdkafka::{ClientConfig, Message};
+
+    let brokers = std::env::var("SUNSPEC_KAFKA_BROKERS")
+        .expect("SUNSPEC_KAFKA_BROKERS must point at a Kafka broker");
+    let topic =
+        std::env::var("SUNSPEC_KAFKA_TOPIC").unwrap_or_else(|_| "sunspec.telemetry".to_string());
+    let consumer: StreamConsumer = ClientConfig::new()
+        .set("bootstrap.servers", &brokers)
+        .set("group.id", format!("e2e-{}", std::process::id()))
+        .set("auto.offset.reset", "earliest")
+        .set("enable.auto.commit", "false")
+        .create()
+        .expect("consumer");
+    consumer.subscribe(&[&topic]).expect("subscribe");
+
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut decoded = 0;
+    let mut collector_records = 0;
+    let mut saw_scaled_power = false;
+    while decoded < 50 && Instant::now() < deadline {
+        let Ok(Ok(message)) = tokio::time::timeout(Duration::from_secs(10), consumer.recv()).await
+        else {
+            break;
+        };
+        let key = std::str::from_utf8(message.key().expect("record key")).expect("utf-8 key");
+        let sample = avro_kafka::decode(message.payload().expect("payload")).expect("decodes");
+        assert_eq!(key, sample.device.key(), "record key matches its device");
+        let headers = message.headers().expect("headers");
+        let content_type = headers
+            .iter()
+            .find(|header| header.key == "content-type")
+            .and_then(|header| header.value)
+            .expect("content-type header");
+        assert_eq!(content_type, avro_kafka::CONTENT_TYPE.as_bytes());
+
+        if key.starts_with("simulator/") {
+            collector_records += 1;
+            if sample.model_id == 103 {
+                saw_scaled_power |= sample.points.iter().any(|(name, value)| {
+                    name == "W" && matches!(value, types::PointValue::Float(_))
+                });
+            }
+        }
+        decoded += 1;
+    }
+
+    println!("decoded {decoded} records, {collector_records} from the collector");
+    assert!(
+        collector_records > 0,
+        "no records from the simulator devices"
+    );
+    assert!(saw_scaled_power, "no decoded model 103 power reading");
+}

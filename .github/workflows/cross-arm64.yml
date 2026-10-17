@@ -1,0 +1,49 @@
+name: Cross-compile (aarch64)
+
+# Builds the release binary for 64-bit ARM edge gateways with `cross` and the custom
+# image in docker/Dockerfile.arm64.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    paths:
+      - "docker/Dockerfile.arm64"
+      - "Cross.toml"
+      - ".github/workflows/cross-arm64.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cross:
+    name: Build aarch64-unknown-linux-gnu
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cross-aarch64
+
+      - name: Install cross
+        run: cargo install cross --locked
+
+      - name: Build the cross image
+        run: docker build -t sunspec-cross-arm64 -f docker/Dockerfile.arm64 .
+
+      - name: Build
+        run: cross build --release --locked --target aarch64-unknown-linux-gnu -p collector-app
+
+      - name: Check the binary
+        run: file target/aarch64-unknown-linux-gnu/release/collector-app | tee /dev/stderr | grep -q "ARM aarch64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: collector-app-aarch64-unknown-linux-gnu
+          path: target/aarch64-unknown-linux-gnu/release/collector-app

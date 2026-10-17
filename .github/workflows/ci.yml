@@ -1,17 +1,11 @@
 name: CI
 
+# Runs on every change: these checks are required for merging into main, and a
+# required check that is skipped by a path filter would block the PR forever.
 on:
   push:
     branches: ["main"]
-    paths:
-      - "crates/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
   pull_request:
-    paths:
-      - "crates/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
 
 env:
   CARGO_TERM_COLOR: always
@@ -69,7 +63,94 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit --locked
 
       - name: Run audit
         run: cargo audit
+
+  docker-e2e:
+    name: Docker E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build simulator image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: simulator
+          tags: sunspec-simulator:local
+          load: true
+          cache-from: type=gha,scope=collector-images
+          cache-to: type=gha,mode=max,scope=collector-images
+
+      - name: Build collector image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: collector
+          tags: sunspec-collector:local
+          load: true
+          cache-from: type=gha,scope=collector-images
+
+      - name: Start Kafka, simulator and collector
+        run: docker compose up -d --no-build kafka simulator collector
+
+      - name: Wait for the collector to be healthy
+        run: |
+          for _ in $(seq 1 90); do
+            if curl -fsS localhost:9090/healthz; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "collector never became healthy"; exit 1
+
+      - name: Wait for records to reach Kafka
+        run: |
+          for _ in $(seq 1 60); do
+            sent=$(curl -fsS localhost:9090/metrics | awk '/^sunspec_uplink_records_total /{print int($2)}')
+            if [ "${sent:-0}" -gt 0 ]; then echo "records acknowledged by Kafka: $sent"; exit 0; fi
+            sleep 2
+          done
+          echo "no records were published"; exit 1
+
+      - name: Records are keyed per device
+        run: |
+          docker compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh \
+            --bootstrap-server localhost:9092 --topic sunspec.telemetry --from-beginning \
+            --max-messages 40 --timeout-ms 30000 \
+            --property print.key=true --property print.value=false > keys.txt || true
+          sort -u keys.txt
+          grep -qx 'simulator/1' keys.txt
+          grep -qx 'simulator/2' keys.txt
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libssl-dev libcurl4-openssl-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Decode published records and run the Kafka integration tests
+        env:
+          SUNSPEC_KAFKA_BROKERS: localhost:29092
+        run: cargo test -p avro-kafka --test kafka_integration_tests -- --ignored --nocapture
+
+      - name: Stop on SIGTERM with a clean exit
+        run: |
+          docker compose stop --timeout 30 collector
+          docker compose logs --no-color collector | tail -n 20
+          docker compose logs --no-color collector | grep -q "collector stopped"
+          test "$(docker inspect -f '{{.State.ExitCode}}' "$(docker compose ps -aq collector)")" = "0"
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

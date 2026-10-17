@@ -1,9 +1,9 @@
-# Build Stage
+# syntax=docker/dockerfile:1
+
+# Build stage: compiles the collector and the device simulator.
 FROM rust:1.88-slim-bookworm AS builder
 
-# Install build dependencies
-# cmake is required for rdkafka-sys; librdkafka 2.12 also needs the curl headers to compile
-# build-essential, pkg-config, libssl-dev are standard requirements
+# cmake builds librdkafka; librdkafka 2.12 also needs the curl headers to compile.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     build-essential \
@@ -14,45 +14,45 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
-# Copy entire workspace
 COPY . .
 
-# Build release binary
-# We use --locked to ensure reproducible builds from Cargo.lock
-RUN cargo build --release --locked --workspace
+# Cache mounts keep the registry and build artifacts between local builds; the
+# binaries are copied out because the target directory is not part of the image.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --locked -p collector-app -p sunspec-sim \
+    && mkdir -p /out \
+    && cp target/release/collector-app target/release/sunspec-sim /out/
 
-# Runtime Stage
-FROM debian:bookworm-slim
+# Shared runtime base.
+FROM debian:bookworm-slim AS runtime
 
-# Install runtime dependencies
-# ca-certificates for SSL, libssl for Kafka encryption, curl for healthcheck
+# ca-certificates and libssl3 for Kafka TLS, curl for the health check.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
     curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
-RUN groupadd -r collector && useradd -r -g collector -s /bin/false collector
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r collector \
+    && useradd -r -g collector -s /bin/false collector
 
 WORKDIR /app
 
-# Create data directory for SQLite buffer
-RUN mkdir -p /app/data && chown collector:collector /app/data
-
-# Copy binary from builder
-COPY --from=builder /app/target/release/collector-app /app/collector-app
-
-# Switch to non-root user
+# Simulated SunSpec inverters for local development and end-to-end tests.
+FROM runtime AS simulator
+COPY --from=builder /out/sunspec-sim /app/sunspec-sim
 USER collector:collector
+EXPOSE 1502
+ENTRYPOINT ["/app/sunspec-sim"]
+CMD ["--bind", "0.0.0.0:1502", "--units", "1"]
 
-# Expose metrics port
+# The collector (default target).
+FROM runtime AS collector
+RUN mkdir -p /app/data && chown collector:collector /app/data
+COPY --from=builder /out/collector-app /app/collector-app
+USER collector:collector
 EXPOSE 9090
-
-# Health check against Prometheus metrics endpoint
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:9090/metrics || exit 1
-
-# Default configuration via env vars is expected, but we can look for config file
+ENV SUNSPEC_BUFFER_PATH=/app/data/buffer.sqlite
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
+    CMD curl -fsS http://localhost:9090/healthz || exit 1
 CMD ["/app/collector-app"]

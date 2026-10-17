@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- CI `Docker E2E` job: builds the images, runs Kafka + simulator + collector with docker compose, waits for `/healthz`, checks records are keyed per device, decodes the published records with the Rust consumer test, and verifies a clean SIGTERM stop
+- `Cross-compile (aarch64)` workflow building the ARM64 release binary with `cross`
+- `simulator` Docker target and compose service (two units behind one gateway), so `docker compose up --build` produces data without hardware
 - `/healthz` endpoint: 200 while ingest and the uplink are checking in, 503 otherwise, with JSON detail (`devices_up`, `devices_total`, heartbeat ages); the systemd watchdog is pinged only while healthy
 - `SUNSPEC_LOG_FORMAT=json` for one JSON object per log line; `RUST_LOG` filtering is explicit
 - `[metrics] port` and `[runtime] channel_capacity` / `respawn_delay_ms` config file sections
@@ -36,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `CONTRIBUTING.md`
 
 ### Fixed
+- docker-compose used `bitnami/kafka:3.7`, which no longer exists on Docker Hub; it now uses the official `apache/kafka:3.9.1` (KRaft) with a host listener on `localhost:29092`
 - Uplink throughput was capped at `batch_size / drain_interval` (200 samples/s by default) because it paused between every batch; it now drains back to back while a backlog remains
 - Gateways: devices are keyed by host and unit ID, so every unit behind one IP is polled (previously only the last one)
 - Model discovery walks the model chain header by header instead of reading a fixed 200-register window, so models beyond register 200 (e.g. status, controls, MPPT) are no longer dropped; the standard bases 40000, 0 and 50000 are probed after the configured one
@@ -53,6 +57,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed unused `retry_count` column from buffer schema
 
 ### Changed
+- CI runs on every push to main and every pull request (no path filters), so its checks can be required for merging
+- The systemd unit runs as a dynamic unprivileged user with `StateDirectory=sunspec-collector` (it ran as root), allows 30 s for the graceful stop, and adds further sandboxing
+- Docker `HEALTHCHECK` uses `/healthz`; images run as a non-root user; `docker/Dockerfile.arm64` drops the unused `librdkafka-dev` and `libsqlite3-dev` packages
 - **Breaking:** config is strict. Unknown keys in the config file, unparsable `SUNSPEC_*` values (the error names the variable), invalid static devices (e.g. unit 300) and unsupported `kafka.compression` / `kafka.acks` values fail at startup instead of silently falling back to defaults
 - **Breaking:** metrics renamed to the `sunspec_` prefix with base units and `_total` counters: `sunspec_buffer_writes_total`, `sunspec_uplink_records_total`, `sunspec_uplink_errors_total`, `sunspec_uplink_publish_seconds`; the high-cardinality `batch_size` label is gone
 - Logs use ANSI colours only on a terminal; per-host discovery timeouts log at debug instead of warn
