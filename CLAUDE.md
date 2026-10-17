@@ -72,8 +72,9 @@ changed. Skipped required jobs count as passing. Keep the list in `ci.yml` in st
 the image start reading another file. `audit.yml` audits `main` daily. `scorecard.yml` runs
 OpenSSF Scorecard (README badge, Security tab); it must stay minimal (no top-level env or
 defaults, only checkout, upload-artifact, upload-sarif and scorecard-action). `codeql.yml` (Rust
-and Actions, `build-mode: none`) and `fuzz.yml` (ClusterFuzzLite, five minutes per code PR,
-30 minutes weekly) run on PRs that change code; neither is required. Fixed fuzz crashes become
+and Actions, `build-mode: none`) runs on PRs that change code or workflows; `fuzz.yml`
+(ClusterFuzzLite) fuzzes for 2 minutes on PRs that change sunspec-parser, poller-actor,
+collector-app's `config.rs` or the fuzz setup, and for 30 minutes weekly; neither is required. Fixed fuzz crashes become
 regression tests in the crate's tests.
 
 Workflow hygiene: pin actions to a full commit SHA with the release as a comment

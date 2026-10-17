@@ -478,11 +478,14 @@ a regression test in the crate's tests (see `values_that_are_not_finite_are_null
 
 In CI, `.github/workflows/fuzz.yml` uses [ClusterFuzzLite](https://google.github.io/clusterfuzzlite/):
 it builds the targets in the OSS-Fuzz Rust image (`.clusterfuzzlite/`) with AddressSanitizer and
-seed corpora from `fuzz/seeds.py`, fuzzes for five minutes on pull requests that change code, and
-for half an hour every Sunday, keeping the corpus between runs as workflow artifacts. A crash fails
-the run and is uploaded with its input. When you add a target, add a `[[bin]]` to
-`fuzz/Cargo.toml`, add it to `targets` in `.clusterfuzzlite/build.sh`, and give it seeds in
-`fuzz/seeds.py` if the fixtures have useful input.
+seed corpora from `fuzz/seeds.py`. It fuzzes for two minutes on pull requests that change the
+fuzzed code (`crates/sunspec-parser/`, `crates/poller-actor/`, `crates/collector-app/src/config.rs`)
+or the fuzzing setup (`fuzz/`, `.clusterfuzzlite/`, the workflow), and for half an hour every
+Sunday, which also covers dependency updates; the corpus is kept between runs as workflow
+artifacts. A crash fails the run and is uploaded with its input. When you add a target, add a
+`[[bin]]` to `fuzz/Cargo.toml`, add it to `targets` in `.clusterfuzzlite/build.sh`, add the code
+it fuzzes to the `paths` in `fuzz.yml`, and give it seeds in `fuzz/seeds.py` if the fixtures have
+useful input.
 
 ---
 

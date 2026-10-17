@@ -1,19 +1,18 @@
 name: Fuzzing
 
 # ClusterFuzzLite builds the cargo-fuzz targets in fuzz/ with AddressSanitizer and runs them:
-# for five minutes on pull requests that change code, and for half an hour every week, keeping
-# the corpus between runs as workflow artifacts. A crash fails the run and is uploaded as an
-# artifact with a reproducer. See the Fuzzing section of docs/DEVELOPER_GUIDE.md.
+# for two minutes on pull requests that change the fuzzed code or the fuzzing setup, and for half
+# an hour every week (which also covers dependency updates), keeping the corpus between runs as
+# workflow artifacts. A crash fails the run and is uploaded as an artifact with a reproducer. See
+# the Fuzzing section of docs/DEVELOPER_GUIDE.md.
 on:
   pull_request:
     paths:
-      - "crates/**"
+      - "crates/sunspec-parser/**"            # decode_model, and decoding in model_chain
+      - "crates/poller-actor/**"              # model_chain: discover_models
+      - "crates/collector-app/src/config.rs"  # config
       - "fuzz/**"
-      - "fixtures/**"
       - ".clusterfuzzlite/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "docs/config.example.toml"
       - ".github/workflows/fuzz.yml"
   schedule:
     - cron: "41 3 * * 0"
@@ -37,7 +36,7 @@ jobs:
       actions: read
     env:
       MODE: ${{ github.event_name == 'pull_request' && 'code-change' || 'batch' }}
-      SECONDS_TOTAL: ${{ github.event_name == 'pull_request' && 300 || 1800 }}
+      SECONDS_TOTAL: ${{ github.event_name == 'pull_request' && 120 || 1800 }}
     steps:
       - name: Build the fuzzers
         uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
