@@ -641,7 +641,10 @@ Coordination:
 - **Shared state:** device and pipeline health are atomics behind `Arc` (`DeviceHealth`, `Health`),
   read by `/healthz` and the watchdog without locks on the polling path.
 - **Modbus:** each session owns its client; requests to one device are serialised by the client's
-  mutex, and different devices are polled concurrently.
+  mutex, and different devices are polled concurrently. Devices with `framing = "rtu"` on the same
+  host and port (units behind one serial converter) instead share one client
+  (`DeviceConfig::shared_client`, created by `collector-app`'s device supervisor), so their
+  requests run one at a time over one connection: RTU frames carry no transaction ID.
 - **SQLite:** ingest, uplink and retention share one sqlx pool; sqlx runs each SQLite connection on
   its own thread, so database I/O does not block the runtime's worker threads.
 - **Kafka:** librdkafka runs its own threads; the uplink awaits delivery reports.

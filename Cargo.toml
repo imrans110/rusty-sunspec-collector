@@ -23,7 +23,7 @@ authors = ["Imran S."]
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "net", "time", "sync", "signal"] }
-tokio-modbus = { version = "0.17", default-features = false, features = ["tcp"] }
+tokio-modbus = { version = "0.17", default-features = false, features = ["tcp", "rtu"] }
 tracing = "0.1"
 thiserror = "1.0"
 anyhow = "1.0"

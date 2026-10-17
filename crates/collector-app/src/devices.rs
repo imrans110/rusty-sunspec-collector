@@ -9,7 +9,8 @@ use tokio::time::{sleep, timeout};
 use tracing::{info, warn};
 
 use discovery::discover_subnet;
-use poller_actor::{run_device, DeviceHealth, Sample};
+use modbus_client::{Framing, ModbusClient};
+use poller_actor::{run_device, DeviceConfig, DeviceHealth, Sample};
 use types::DeviceIdentity;
 
 use crate::config::CollectorConfig;
@@ -29,6 +30,8 @@ pub async fn run(
 ) {
     let mut tasks = JoinSet::new();
     let mut known: HashMap<DeviceIdentity, Arc<DeviceHealth>> = HashMap::new();
+    // One client per RTU-over-TCP converter (host and port), shared by its units.
+    let mut converters: HashMap<(String, u16), Arc<ModbusClient>> = HashMap::new();
     let static_mode = !config.discovery.static_devices.is_empty();
     let rescan = Duration::from_secs(config.rescan_interval_s);
 
@@ -56,12 +59,8 @@ pub async fn run(
             let health = Arc::new(DeviceHealth::default());
             known.insert(identity.clone(), health.clone());
             health_registry.register_device(identity.key(), health.clone());
-            tasks.spawn(run_device(
-                config.device_config(identity),
-                sender.clone(),
-                shutdown.clone(),
-                health,
-            ));
+            let device = with_shared_converter(config.device_config(identity), &mut converters);
+            tasks.spawn(run_device(device, sender.clone(), shutdown.clone(), health));
         }
         gauge!("sunspec_devices_known").set(known.len() as f64);
         if known.is_empty() {
@@ -88,4 +87,24 @@ pub async fn run(
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
     }
+}
+
+/// Units behind the same RTU-over-TCP converter must not send overlapping requests
+/// (RTU has no transaction IDs), so they share one client, which runs one request at a
+/// time over one connection.
+fn with_shared_converter(
+    mut device: DeviceConfig,
+    converters: &mut HashMap<(String, u16), Arc<ModbusClient>>,
+) -> DeviceConfig {
+    if device.modbus.framing == Framing::Rtu {
+        let key = (device.identity.ip.clone(), device.modbus.port);
+        let client = converters.entry(key).or_insert_with(|| {
+            let mut modbus = device.modbus.clone();
+            modbus.host = device.identity.ip.clone();
+            modbus.timeout_ms = device.actor.request_timeout.as_millis() as u64;
+            Arc::new(ModbusClient::new(modbus))
+        });
+        device.shared_client = Some(client.clone());
+    }
+    device
 }

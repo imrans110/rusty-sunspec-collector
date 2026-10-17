@@ -56,6 +56,9 @@ default silently. The following are errors:
 - Model settings (see [Polling profiles](#polling-profiles)): a model ID outside 1–65534, an empty
   `include_models`, a model in both `include_models` and `exclude_models`, a `model_intervals_s`
   entry of 0, and a static device listed twice.
+- A `framing` other than `tcp` or `rtu`, and static devices behind the same RTU converter (same
+  host and port, `framing = "rtu"`) with different `request_timeout_ms` or `max_batch_size`: they
+  share one connection.
 
 A misspelled key in the file:
 
@@ -185,6 +188,7 @@ sessions are retried with the backoff described under `runtime.respawn_delay_ms`
 | `modbus.retry_backoff_ms` | — | `100` | Delay before the first retry; doubles on each further retry. ≥ 1. |
 | `modbus.retry_max_backoff_ms` | — | `2000` | Upper bound for the retry delay. ≥ 1. |
 | `modbus.inter_read_delay_ms` | — | unset | Pause between the requests of one split read, for devices that need it. ≥ 1 when set. |
+| `modbus.framing` | `SUNSPEC_MODBUS_FRAMING` | `tcp` | `tcp` for Modbus TCP, or `rtu` for Modbus RTU frames over TCP, as a transparent serial-to-Ethernet converter in front of an RS-485 bus passes them. Units on the same host and port then share one connection; see [Serial devices through a converter](ops.md#serial-devices-through-a-converter). |
 
 With the defaults, one request to an unresponsive device takes up to three timeouts plus 300 ms of
 backoff before it fails. Keep `poller.request_timeout_ms × (retry_count + 1)` well below the poll
@@ -391,6 +395,7 @@ device:
 | `request_timeout_ms` | `poller.request_timeout_ms` | ≥ 1. |
 | `base_address` | `sunspec.base_address` | Probed first; the standard bases follow. |
 | `max_batch_size` | `modbus.max_batch_size` | 1–125. |
+| `framing` | `modbus.framing` | `tcp` or `rtu`. |
 | `include_models` | `poller.include_models` | Replaces the global list. |
 | `exclude_models` | `poller.exclude_models` | Replaces the global list; `[]` clears it for this device. |
 | `model_intervals_s` | `poller.model_intervals_s` | Merged model by model; the device's entries win. |

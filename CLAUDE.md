@@ -77,6 +77,12 @@ the owner's approval).
   discover → poll. On failure or stall, back off `respawn_delay_ms` × 2^(n−1), capped at 60 s, plus
   up to 10 % device-salted jitter; reset after a session that polled. Exits only on shutdown.
   Devices are keyed by host and unit ID.
+- **RTU over TCP**: `modbus.framing = "rtu"` (or per device, or `SUNSPEC_MODBUS_FRAMING`) makes
+  `ModbusClient` attach tokio-modbus's RTU client to a TCP stream. Units with RTU framing on one
+  host:port share one lazily connecting `ModbusClient` (`DeviceConfig::shared_client`, built in
+  `devices.rs`), so requests never overlap on the bus; validation requires them to share
+  `request_timeout_ms` and `max_batch_size`. `sunspec_sim::start_rtu_over_tcp` / `sunspec-sim --rtu`
+  simulate a converter.
 - **Probe and fixtures**: `collector-app --probe host[:unit]` (`collector_app::probe::probe`)
   writes a `types::DeviceDump` (format 1: registers as hex words, points in definition order,
   top-level `SN`/MAC/IP blanked unless `--keep-identifiers`); `sunspec-sim --fixture` and

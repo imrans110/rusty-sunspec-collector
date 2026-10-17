@@ -4,16 +4,33 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use thiserror::Error;
-use tokio::net::lookup_host;
+use tokio::net::{lookup_host, TcpStream};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
-use tokio_modbus::client::{tcp, Context, Reader};
+use tokio_modbus::client::{rtu, tcp, Context, Reader};
 use tokio_modbus::slave::{Slave, SlaveContext};
 pub use tokio_modbus::ExceptionCode;
 use tracing::{debug, info, warn};
 
 /// Protocol limit for a single read holding registers (0x03) request.
 pub const MAX_REGISTERS_PER_READ: u16 = 125;
+
+/// How Modbus requests are framed on the TCP connection.
+#[cfg_attr(
+    feature = "config",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "lowercase")
+)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Framing {
+    /// Modbus TCP (MBAP header with transaction IDs).
+    #[default]
+    Tcp,
+    /// Modbus RTU frames (unit ID, PDU, CRC) carried over TCP, as transparent
+    /// serial-to-Ethernet converters pass them to an RS-485 bus. There are no
+    /// transaction IDs, so only one request may be in flight per connection.
+    Rtu,
+}
 
 /// Configuration options for connecting and polling a Modbus TCP device.
 #[cfg_attr(feature = "config", derive(serde::Serialize, serde::Deserialize))]
@@ -34,6 +51,8 @@ pub struct ClientConfig {
     pub retry_max_backoff_ms: u64,
     /// Optional delay between split reads to placate slower devices.
     pub inter_read_delay_ms: Option<u64>,
+    /// Modbus TCP, or RTU frames over TCP for serial converters.
+    pub framing: Framing,
 }
 
 impl Default for ClientConfig {
@@ -47,6 +66,7 @@ impl Default for ClientConfig {
             retry_backoff_ms: 100,
             retry_max_backoff_ms: 2_000,
             inter_read_delay_ms: None,
+            framing: Framing::Tcp,
         }
     }
 }
@@ -116,6 +136,20 @@ impl ModbusClient {
             config,
             context: Mutex::new(Some(context)),
         })
+    }
+
+    /// A client that connects on its first read. Requests from every holder of a
+    /// shared client run one at a time, which RTU over TCP needs when several units
+    /// sit behind one serial converter.
+    pub fn new(config: ClientConfig) -> Self {
+        Self {
+            config,
+            context: Mutex::new(None),
+        }
+    }
+
+    pub fn config(&self) -> &ClientConfig {
+        &self.config
     }
 
     pub async fn read_range(
@@ -203,7 +237,7 @@ impl ModbusClient {
             Some(ctx) => ctx,
             None => {
                 let ctx = open(&self.config).await?;
-                info!(host = %self.config.host, port = self.config.port, "modbus reconnected");
+                info!(host = %self.config.host, port = self.config.port, "modbus connected");
                 slot.insert(ctx)
             }
         };
@@ -242,7 +276,17 @@ async fn open(config: &ClientConfig) -> Result<Context, ClientError> {
         .map_err(|_| invalid())?;
     let mut last_error = None;
     for addr in addrs {
-        match timeout(Duration::from_millis(config.timeout_ms), tcp::connect(addr)).await {
+        let connect = async {
+            match config.framing {
+                Framing::Tcp => tcp::connect(addr).await,
+                Framing::Rtu => {
+                    let stream = TcpStream::connect(addr).await?;
+                    stream.set_nodelay(true)?;
+                    Ok(rtu::attach(stream))
+                }
+            }
+        };
+        match timeout(Duration::from_millis(config.timeout_ms), connect).await {
             Ok(Ok(context)) => return Ok(context),
             Ok(Err(source)) => last_error = Some(ClientError::Connect { addr, source }),
             Err(_) => {
