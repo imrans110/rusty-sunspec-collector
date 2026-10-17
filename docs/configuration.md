@@ -450,6 +450,8 @@ Useful debug targets:
 |--------|--------|
 | `--config PATH`, `--config=PATH` | Read this config file. Overrides `SUNSPEC_CONFIG`. |
 | `--print-schema` | Print the Avro schema of the published records as JSON and exit. No configuration is loaded. |
+| `--probe HOST[:UNIT]` | Read one device's SunSpec map once, print it as JSON and exit; see [Probing a device](ops.md#probing-a-device). Uses the port, timeouts, base address and static-device overrides from the configuration. |
+| `--keep-identifiers` | With `--probe`: keep serial numbers and network addresses instead of blanking them. |
 | `--version`, `-V` | Print `collector-app <version>` and exit. |
 | `--help`, `-h` | Print a short usage summary and exit. |
 

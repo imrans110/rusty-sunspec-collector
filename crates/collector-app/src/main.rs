@@ -10,7 +10,12 @@ use collector_app::CollectorConfig;
 
 const USAGE: &str = "\
 usage: collector-app [--config PATH]
+       collector-app --probe HOST[:UNIT] [--keep-identifiers] [--config PATH]
        collector-app --print-schema | --version | --help
+
+--probe reads one device's SunSpec map once and prints it as JSON (for device reports and
+sunspec-sim --fixture). Serial numbers and network addresses are blanked unless
+--keep-identifiers is given. The port, timeouts and base address come from the config.
 
 Settings come from the config file (--config or SUNSPEC_CONFIG) and SUNSPEC_* environment
 variables; see https://imrans110.github.io/rusty-sunspec-collector/configuration.html";
@@ -33,6 +38,9 @@ async fn main() -> Result<()> {
             }
             _ => {}
         }
+    }
+    if let Some(target) = arg_value("--probe") {
+        return run_probe(&target).await;
     }
     init_logging()?;
 
@@ -85,14 +93,62 @@ async fn shutdown_signal() {
 }
 
 fn parse_config_arg() -> Option<String> {
+    arg_value("--config")
+}
+
+/// The value of `--name VALUE` or `--name=VALUE`.
+fn arg_value(name: &str) -> Option<String> {
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
-        if arg == "--config" {
+        if arg == name {
             return args.next();
         }
-        if let Some(path) = arg.strip_prefix("--config=") {
-            return Some(path.to_string());
+        if let Some(value) = arg
+            .strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix('='))
+        {
+            return Some(value.to_string());
         }
     }
     None
+}
+
+/// Prints the dump as JSON on stdout; progress and warnings go to stderr, so the output
+/// can be redirected to a file.
+async fn run_probe(target: &str) -> Result<()> {
+    let identity = collector_app::config::parse_device(target).context("--probe")?;
+    let config =
+        CollectorConfig::load_with_path(parse_config_arg()).context("load config failed")?;
+    config.validate().context("config validation failed")?;
+    let keep_identifiers = env::args().any(|arg| arg == "--keep-identifiers");
+
+    let dump = collector_app::probe::probe(&config, identity, keep_identifiers).await?;
+    println!("{}", serde_json::to_string_pretty(&dump)?);
+
+    let models: Vec<String> = dump
+        .models
+        .iter()
+        .map(|model| model.id.to_string())
+        .collect();
+    eprintln!(
+        "{}/{}: SunSpec map at {}, models {}",
+        dump.host,
+        dump.unit_id,
+        dump.base_address,
+        models.join(", ")
+    );
+    for model in dump.models.iter().filter(|model| model.error.is_some()) {
+        eprintln!(
+            "warning: model {} could not be read: {}",
+            model.id,
+            model.error.as_deref().unwrap_or_default()
+        );
+    }
+    if !dump.redacted.is_empty() {
+        eprintln!(
+            "blanked {} (use --keep-identifiers to keep them)",
+            dump.redacted.join(", ")
+        );
+    }
+    Ok(())
 }

@@ -1962,9 +1962,11 @@ dependencies = [
 name = "sunspec-sim"
 version = "0.3.0"
 dependencies = [
+ "serde_json",
  "sunspec-parser",
  "tokio",
  "tracing",
+ "types",
 ]
 
 [[package]]

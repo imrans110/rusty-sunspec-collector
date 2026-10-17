@@ -791,6 +791,14 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) -> Result<(
     Ok(())
 }
 
+/// Parses one `host[:unit_id]` device, as used by `--probe`; the unit defaults to 1.
+pub fn parse_device(value: &str) -> Result<DeviceIdentity> {
+    match parse_static_devices(value)?.as_slice() {
+        [device] => Ok(device.clone()),
+        _ => bail!("expected one host[:unit], got {value:?}"),
+    }
+}
+
 /// Parses `host[:unit_id]` entries such as `192.168.1.20:1,inverter.local`.
 fn parse_static_devices(value: &str) -> Result<Vec<DeviceIdentity>> {
     value

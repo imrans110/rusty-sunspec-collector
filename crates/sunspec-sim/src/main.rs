@@ -2,10 +2,12 @@ use std::env;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 
-use sunspec_sim::{parse_models, SimConfig, UnitSpec, Unmapped};
+use sunspec_sim::{parse_models, read_dump, SimConfig, UnitSpec, Unmapped};
+use types::DeviceDump;
 
 const USAGE: &str =
-    "usage: sunspec-sim [--bind ADDR:PORT] [--units 1,2] [--models 1,103,160:48] [--base 40000]";
+    "usage: sunspec-sim [--bind ADDR:PORT] [--units 1,2] [--models 1,103,160:48] [--base 40000]
+       sunspec-sim [--bind ADDR:PORT] --fixture DUMP.json   (replay a collector-app --probe dump)";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -32,7 +34,24 @@ async fn main() -> ExitCode {
         }
     };
     println!("sunspec-sim listening on {}", handle.local_addr());
-    sunspec_sim::run_demo(handle.clone(), config.unit_ids);
+    match &config.fixture {
+        Some(dump) => {
+            handle.load_dump(dump.unit_id, dump);
+            let models: Vec<String> = dump
+                .models
+                .iter()
+                .map(|model| model.id.to_string())
+                .collect();
+            println!(
+                "replaying {} unit {}: base {}, models {}",
+                dump.host,
+                dump.unit_id,
+                dump.base_address,
+                models.join(", ")
+            );
+        }
+        None => sunspec_sim::run_demo(handle.clone(), config.unit_ids),
+    }
 
     wait_for_shutdown().await;
     ExitCode::SUCCESS
@@ -42,6 +61,8 @@ struct Args {
     bind: SocketAddr,
     sim: SimConfig,
     unit_ids: Vec<u8>,
+    /// A probe dump to replay instead of the demo.
+    fixture: Option<DeviceDump>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -49,6 +70,8 @@ fn parse_args() -> Result<Args, String> {
     let mut units = vec![1u8];
     let mut models = parse_models("1,103,120,160:48")?;
     let mut base = 40_000u16;
+    let mut fixture = None;
+    let mut chain_set = false;
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -64,17 +87,39 @@ fn parse_args() -> Result<Args, String> {
                     .split(',')
                     .map(|unit| unit.trim().parse::<u8>())
                     .collect::<Result<_, _>>()
-                    .map_err(|_| "--units must be a list of 0-255".to_string())?
+                    .map_err(|_| "--units must be a list of 0-255".to_string())?;
+                chain_set = true;
             }
-            "--models" => models = parse_models(&value()?)?,
+            "--models" => {
+                models = parse_models(&value()?)?;
+                chain_set = true;
+            }
+            "--fixture" => fixture = Some(read_dump(std::path::Path::new(&value()?))?),
             "--base" => {
                 base = value()?
                     .parse()
-                    .map_err(|_| "--base must be 0-65535".to_string())?
+                    .map_err(|_| "--base must be 0-65535".to_string())?;
+                chain_set = true;
             }
             "--help" | "-h" => return Err(String::new()),
             other => return Err(format!("unknown argument {other}")),
         }
+    }
+
+    if let Some(dump) = fixture {
+        if chain_set {
+            return Err(
+                "--fixture sets the unit, base and models; drop --units, --models and --base"
+                    .to_string(),
+            );
+        }
+        let unit = UnitSpec::from_dump(&dump)?;
+        return Ok(Args {
+            bind,
+            sim: SimConfig::single(unit),
+            unit_ids: vec![dump.unit_id],
+            fixture: Some(dump),
+        });
     }
 
     let unit_ids = units.clone();
@@ -93,6 +138,7 @@ fn parse_args() -> Result<Args, String> {
             unmapped: Unmapped::Exception,
         },
         unit_ids,
+        fixture: None,
     })
 }
 
