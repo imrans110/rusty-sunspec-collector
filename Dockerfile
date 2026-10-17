@@ -46,13 +46,14 @@ EXPOSE 1502
 ENTRYPOINT ["/app/sunspec-sim"]
 CMD ["--bind", "0.0.0.0:1502", "--units", "1"]
 
-# The collector (default target).
+# The collector (default target). It runs in /app/data (a volume in compose) so the
+# default relative buffer path lands there; buffer.path in a config file still applies.
 FROM runtime AS collector
 RUN mkdir -p /app/data && chown collector:collector /app/data
 COPY --from=builder /out/collector-app /app/collector-app
 USER collector:collector
+WORKDIR /app/data
 EXPOSE 9090
-ENV SUNSPEC_BUFFER_PATH=/app/data/buffer.sqlite
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:9090/healthz || exit 1
+    CMD curl -fsS "http://localhost:${SUNSPEC_METRICS_PORT:-9090}/healthz" || exit 1
 CMD ["/app/collector-app"]

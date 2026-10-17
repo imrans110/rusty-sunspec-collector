@@ -102,11 +102,13 @@ impl CollectorConfig {
         if self.modbus.port == 0 {
             bail!("modbus.port must be between 1 and 65535");
         }
-        if self.modbus.max_batch_size == Some(0) {
-            bail!("modbus.max_batch_size must be >= 1");
-        }
-        if self.modbus.timeout_ms == 0 {
-            bail!("modbus.timeout_ms must be >= 1");
+        if let Some(max_batch) = self.modbus.max_batch_size {
+            if max_batch == 0 || max_batch > modbus_client::MAX_REGISTERS_PER_READ {
+                bail!(
+                    "modbus.max_batch_size must be between 1 and {} (Modbus protocol limit)",
+                    modbus_client::MAX_REGISTERS_PER_READ
+                );
+            }
         }
         if self.modbus.retry_backoff_ms == 0 {
             bail!("modbus.retry_backoff_ms must be >= 1");
@@ -163,6 +165,11 @@ impl CollectorConfig {
         }
         if let Some(ref acks) = self.kafka_acks {
             ensure_one_of("kafka.acks", acks, KAFKA_ACKS)?;
+            // librdkafka refuses to create an idempotent producer without acks=all.
+            let idempotent = self.kafka_enable_idempotence.unwrap_or(true);
+            if idempotent && acks != "all" && acks != "-1" {
+                bail!("kafka.acks must be all (or -1) while kafka.enable_idempotence is true");
+            }
         }
 
         Ok(())
@@ -254,8 +261,10 @@ fn apply_env_overrides(config: &mut CollectorConfig) -> Result<()> {
     if let Some(value) = env_parse("SUNSPEC_MAX_BATCH_SIZE")? {
         config.modbus.max_batch_size = Some(value);
     }
-    if let Some(ms) = env_parse("SUNSPEC_MODBUS_TIMEOUT_MS")? {
-        config.modbus.timeout_ms = ms;
+    if env::var_os("SUNSPEC_MODBUS_TIMEOUT_MS").is_some() {
+        warn!(
+            "SUNSPEC_MODBUS_TIMEOUT_MS is deprecated and ignored; use SUNSPEC_REQUEST_TIMEOUT_MS"
+        );
     }
 
     if let Some(value) = env_parse("SUNSPEC_BASE_ADDRESS")? {
@@ -364,6 +373,8 @@ struct FilePollerConfig {
 struct FileModbusConfig {
     port: Option<u16>,
     max_batch_size: Option<u16>,
+    /// Deprecated and ignored (device sessions use poller.request_timeout_ms);
+    /// accepted so existing files keep loading.
     timeout_ms: Option<u64>,
     retry_count: Option<usize>,
     retry_backoff_ms: Option<u64>,
@@ -500,7 +511,9 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) -> Result<(
         if let Some(max_batch) = modbus.max_batch_size {
             config.modbus.max_batch_size = Some(max_batch);
         }
-        set(&mut config.modbus.timeout_ms, modbus.timeout_ms);
+        if modbus.timeout_ms.is_some() {
+            warn!("modbus.timeout_ms is deprecated and ignored; use poller.request_timeout_ms");
+        }
         set(&mut config.modbus.retry_count, modbus.retry_count);
         set(&mut config.modbus.retry_backoff_ms, modbus.retry_backoff_ms);
         set(

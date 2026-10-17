@@ -124,6 +124,75 @@ fn metrics_and_runtime_sections_are_applied() {
     let _ = std::fs::remove_file(path);
 }
 
+#[test]
+fn shipped_example_config_file_is_valid() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let path = repo_path("docs/config.example.toml");
+
+    let config = CollectorConfig::load_with_path(Some(path)).expect("example config loads");
+
+    config.validate().expect("example config validates");
+}
+
+/// systemd `EnvironmentFile=` and `docker --env-file` take everything after `=` as the
+/// value (no trailing comments), so every assignment in the shipped env file must parse.
+#[test]
+fn shipped_example_env_file_is_valid() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let content =
+        std::fs::read_to_string(repo_path("docs/sunspec-collector.env")).expect("read env file");
+    let vars: Vec<(String, String)> = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let (key, value) = line.split_once('=').expect("KEY=value");
+            (key.to_string(), value.to_string())
+        })
+        .collect();
+    assert!(!vars.is_empty());
+    for (key, value) in &vars {
+        env::set_var(key, value);
+    }
+
+    let result = CollectorConfig::load().and_then(|config| config.validate());
+
+    for (key, _) in &vars {
+        env::remove_var(key);
+    }
+    result.expect("example env file loads and validates");
+}
+
+fn repo_path(relative: &str) -> String {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("../..");
+    path.push(relative);
+    path.to_string_lossy().to_string()
+}
+
+#[test]
+fn acks_below_all_require_idempotence_off() {
+    let mut config = CollectorConfig {
+        kafka_acks: Some("1".to_string()),
+        ..Default::default()
+    };
+    let err = config.validate().expect_err("idempotence is on by default");
+    assert!(err.to_string().contains("enable_idempotence"), "{err}");
+
+    config.kafka_enable_idempotence = Some(false);
+    config.validate().expect("acks=1 without idempotence");
+}
+
+#[test]
+fn modbus_batch_size_is_limited_to_the_protocol_maximum() {
+    let mut config = CollectorConfig::default();
+    config.modbus.max_batch_size = Some(126);
+    assert!(config.validate().is_err());
+
+    config.modbus.max_batch_size = Some(125);
+    config.validate().expect("125 is the protocol limit");
+}
+
 fn write_temp(name: &str, content: &str) -> String {
     let path = std::env::temp_dir().join(format!("{}-{name}", std::process::id()));
     std::fs::write(&path, content).expect("write temp config");

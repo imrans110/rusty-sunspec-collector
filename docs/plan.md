@@ -325,22 +325,24 @@ tokio::spawn(async {
 
 ## Backlog (future scope)
 
-- [ ] Normalize SunSpec readings into domain-specific structs (apply scale factors and sentinel rules at the edge).
-- [ ] Add repeating group support for SunSpec parser (storage/BESS modules).
+Updated October 2026 after the audit fixes; see [Code Review](CODE_REVIEW.md).
+
+- [x] Decode SunSpec readings at the edge (scale factors, sentinel rules, named points) using the official model definitions.
+- [x] Add repeating group support for SunSpec parser (e.g. MPPT modules, `group[i].Point`).
 - [ ] Add per-device polling profiles (model filters, interval overrides, device-specific quirks).
-- [ ] Add backpressure from buffer depth to pollers (pause polling when buffer exceeds threshold).
+- [ ] Add backpressure from buffer depth to pollers (today: a full channel drops and counts samples, and retention bounds the buffer).
 - [ ] Add Kafka TLS/SASL configuration + secret loading strategy.
-- [ ] Add Schema Registry integration + schema evolution policy docs.
-- [ ] Add Prometheus metrics exporter (poll latency, queue depth, uplink throughput).
+- [ ] Add Schema Registry integration + schema evolution policy docs (records use Avro single-object encoding with the schema fingerprint today).
+- [x] Add Prometheus metrics exporter (poll latency, queue depth, uplink throughput) with histograms and help text.
 - [ ] Add config reload support (SIGHUP) with validation + safe rollback.
-- [ ] Add buffer retention policy (size/age-based pruning) + scheduled maintenance job.
+- [x] Add buffer retention policy (size/age-based pruning) + scheduled maintenance job.
 - [ ] Add buffer compaction and integrity checks for flash endurance.
 - [ ] Add certificate rotation workflow for Kafka TLS credentials.
-- [ ] Add structured error taxonomy + error-to-metric mapping.
+- [ ] Add structured error taxonomy + error-to-metric mapping (partly done: `sunspec_poll_errors_total{kind}` and `sunspec_buffer_dropped_total{reason}`).
 - [ ] Add data quality flags (stale, partial, invalid, retries) in uplink payloads.
-- [ ] Add device health checks (connectivity, last-successful poll, model drift).
-- [ ] Add simulator-driven integration suite for multiple device models.
+- [x] Add device health checks (`sunspec_device_up`, last-successful poll, stall detection; models are rediscovered on every reconnect).
+- [x] Add simulator-driven integration suite (`sunspec-sim` crate, end-to-end tests, CI Docker E2E job).
 - [ ] Add packaging pipeline (deb/rpm/container) with upgrade-safe config paths.
 - [ ] Add audit log for config changes and runtime control events.
 - [ ] Add support for multiple Kafka topics per device/model.
-- [ ] Evaluate adopting upstream `sunspec` crate for model types/codegen, or document why the in-tree parser remains preferred.
+- [x] Model definitions: bundle the official SunSpec JSON definitions and decode generically in-tree, instead of generated per-model types, so new models need no code changes.

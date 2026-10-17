@@ -23,10 +23,14 @@ async fn metrics_and_health_report_a_polled_device() {
         .display()
         .to_string();
     let mut config = CollectorConfig::default();
-    config.discovery.static_devices = vec![DeviceIdentity {
-        ip: "127.0.0.1".to_string(),
-        unit_id: 1,
-    }];
+    // Unit 7 does not exist on the simulator: it must still show up, as down.
+    config.discovery.static_devices = [1, 7]
+        .into_iter()
+        .map(|unit_id| DeviceIdentity {
+            ip: "127.0.0.1".to_string(),
+            unit_id,
+        })
+        .collect();
     config.modbus.port = sim.port();
     config.poller.poll_interval = Duration::from_millis(100);
     config.buffer_path = buffer_path.clone();
@@ -46,12 +50,14 @@ async fn metrics_and_health_report_a_polled_device() {
     assert!(health.starts_with("HTTP/1.1 200"), "{health}");
     assert!(health.contains("\"healthy\":true"), "{health}");
     assert!(health.contains("\"devices_up\":1"), "{health}");
+    assert!(health.contains("\"devices_total\":2"), "{health}");
 
     let metrics = http_get(port, "/metrics").await;
     for expected in [
         "# HELP sunspec_poll_success_total",
         "sunspec_poll_success_total{device=\"127.0.0.1/1\"}",
         "sunspec_device_up{device=\"127.0.0.1/1\"} 1",
+        "sunspec_device_up{device=\"127.0.0.1/7\"} 0",
         "sunspec_poll_duration_seconds_bucket{device=\"127.0.0.1/1\",le=\"0.005\"}",
         "sunspec_buffer_writes_total",
         "sunspec_uplink_records_total",

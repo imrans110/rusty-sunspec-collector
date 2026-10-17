@@ -38,11 +38,14 @@ pub async fn run_with_publisher(
 ) -> Result<()> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let health = Arc::new(Health::default());
+    let listener = metrics_server::bind(config.metrics_port)
+        .await
+        .with_context(|| format!("bind metrics port {}", config.metrics_port))?;
     tokio::spawn(metrics_server::serve(
+        listener,
         metrics,
         health.clone(),
         shutdown_rx.clone(),
-        config.metrics_port,
     ));
 
     let buffer = BufferStore::new(&config.buffer_path)

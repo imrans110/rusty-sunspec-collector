@@ -33,7 +33,7 @@ fn describe_metrics() {
     );
     describe_counter!(
         "sunspec_poll_errors_total",
-        "Failed model reads, by device and kind (exception, timeout, transport, connect)."
+        "Failed model reads, by device and kind (exception, timeout, transport, connect, address)."
     );
     describe_histogram!(
         "sunspec_poll_duration_seconds",
@@ -82,7 +82,7 @@ fn describe_metrics() {
     );
     describe_counter!(
         "sunspec_uplink_errors_total",
-        "Records Kafka did not acknowledge (they stay buffered)."
+        "Record delivery attempts Kafka did not acknowledge (records stay buffered and are retried, so a record can count more than once)."
     );
     describe_histogram!(
         "sunspec_uplink_publish_seconds",
@@ -91,12 +91,18 @@ fn describe_metrics() {
     );
 }
 
+/// Binds the HTTP port up front so a port conflict fails startup instead of leaving the
+/// collector running without `/metrics` and `/healthz`.
+pub async fn bind(port: u16) -> std::io::Result<tokio::net::TcpListener> {
+    tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await
+}
+
 /// Serves `/healthz` and, when a recorder is installed, `/metrics` until shutdown.
 pub async fn serve(
+    listener: tokio::net::TcpListener,
     handle: Option<PrometheusHandle>,
     health: Arc<Health>,
     mut shutdown: watch::Receiver<bool>,
-    port: u16,
 ) {
     let mut app = Router::new().route(
         "/healthz",
@@ -116,14 +122,6 @@ pub async fn serve(
         app = app.route("/metrics", get(move || async move { handle.render() }));
     }
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = match tokio::net::TcpListener::bind(addr).await {
-        Ok(listener) => listener,
-        Err(err) => {
-            warn!(%addr, error = %err, "failed to bind metrics port");
-            return;
-        }
-    };
     if let Ok(addr) = listener.local_addr() {
         info!(%addr, "serving /metrics and /healthz");
     }
