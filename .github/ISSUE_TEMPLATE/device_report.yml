@@ -50,4 +50,4 @@ body:
     id: version
     attributes:
       label: Collector version
-      placeholder: collector-app 0.2.0
+      placeholder: collector-app 0.3.0
