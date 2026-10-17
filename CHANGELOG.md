@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `sunspec-sim --rtu` and `sunspec_sim::start_rtu_over_tcp` simulate a converter (RTU framing with CRC; absent units stay silent); `ModbusClient::new` creates a client that connects on its first read
 
 ### Changed
+- Every crate now declares the workspace MSRV (`rust-version = "1.88"`), and the workspace uses Cargo's resolver 3, so dependency updates keep to versions that build on Rust 1.88
 - The help text of `sunspec_poll_duration_seconds` now says it times the models due in one poll cycle (it has done so since polling profiles)
 
 ### Fixed

@@ -1,5 +1,5 @@
 use apache_avro::rabin::Rabin;
-use avro_kafka::{decode, encode, schema, single_object_header, Publisher};
+use avro_kafka::{decode, encode, schema, schema_fingerprint_hex, single_object_header, Publisher};
 use types::{DeviceIdentity, PointValue, Sample};
 
 fn sample(unit_id: u8) -> Sample {
@@ -86,4 +86,52 @@ async fn each_sample_is_its_own_record_keyed_by_device() {
     let keys: Vec<&str> = records.iter().map(|record| record.key.as_str()).collect();
     assert_eq!(keys, vec!["10.0.0.5/1", "10.0.0.5/2", "10.0.0.5/1"]);
     assert_eq!(decode(&records[1].payload).unwrap().device.unit_id, 2);
+}
+
+/// A sample whose maps have one entry each: Avro writes map entries in `HashMap` order,
+/// so only single-entry maps encode to the same bytes every time.
+fn golden_sample(name: &str, value: PointValue) -> Sample {
+    Sample {
+        device: DeviceIdentity {
+            ip: "192.168.1.50".to_string(),
+            unit_id: 3,
+        },
+        model_id: 103,
+        model_name: "inverter_three_phase".to_string(),
+        start: 40_070,
+        registers: vec![103, 50, 0, 1, 0x7fff, 0x8000, 0xffff],
+        collected_at_ms: 1_792_252_800_123,
+        points: vec![(name.to_string(), value)],
+        labels: vec![("St".to_string(), "MPPT".to_string())],
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn unhex(text: &str) -> Vec<u8> {
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+        .collect()
+}
+
+/// Records are a public contract (schema 2.1, `com.rusty.sunspec.v2`). These bytes were
+/// written by apache-avro 0.21; a dependency update or schema change that alters what is
+/// on the wire fails here. A deliberate schema change updates them, with a CHANGELOG entry.
+#[test]
+fn records_keep_their_wire_format() {
+    let cases = [
+        ("VA", PointValue::Null, "c301e49fd96733758f2f1c3139322e3136382e312e35302f33183139322e3136382e312e353006ce0128696e7665727465725f74687265655f70686173658cf204f6b1bba9a96802045641000002045374084d505054000ece01640002feff03808004feff0700"),
+        ("W", PointValue::Float(-1234.5), "c301e49fd96733758f2f1c3139322e3136382e312e35302f33183139322e3136382e312e353006ce0128696e7665727465725f74687265655f70686173658cf204f6b1bba9a9680202570200000000004a93c00002045374084d505054000ece01640002feff03808004feff0700"),
+        ("WH", PointValue::Int(65_541), "c301e49fd96733758f2f1c3139322e3136382e312e35302f33183139322e3136382e312e353006ce0128696e7665727465725f74687265655f70686173658cf204f6b1bba9a96802045748048a80080002045374084d505054000ece01640002feff03808004feff0700"),
+        ("Mn", PointValue::Text("Rüsty".to_string()), "c301e49fd96733758f2f1c3139322e3136382e312e35302f33183139322e3136382e312e353006ce0128696e7665727465725f74687265655f70686173658cf204f6b1bba9a96802044d6e060c52c3bc7374790002045374084d505054000ece01640002feff03808004feff0700"),
+    ];
+    for (name, value, expected) in cases {
+        let sample = golden_sample(name, value);
+        assert_eq!(hex(&encode(&sample).unwrap()), expected, "encoding {name}");
+        assert_eq!(decode(&unhex(expected)).unwrap(), sample, "decoding {name}");
+    }
+    assert_eq!(schema_fingerprint_hex(), "e49fd96733758f2f");
 }

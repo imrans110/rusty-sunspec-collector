@@ -2,6 +2,7 @@
 name = "poller-actor"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Per-device poller actors with supervision and backoff"

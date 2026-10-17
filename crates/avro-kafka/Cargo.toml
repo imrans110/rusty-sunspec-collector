@@ -2,6 +2,7 @@
 name = "avro-kafka"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Avro OCF serialization with Kafka producer"
@@ -9,7 +10,7 @@ description = "Avro OCF serialization with Kafka producer"
 [dependencies]
 thiserror = { workspace = true }
 tracing = { workspace = true }
-apache-avro = "0.21"
+apache-avro = "0.22"
 rdkafka = { version = "0.39", features = ["cmake-build", "ssl", "tokio", "zstd"] }
 
 types = { path = "../types" }
@@ -20,5 +21,5 @@ vendored-openssl = ["rdkafka/ssl-vendored"]
 
 [dev-dependencies]
 tokio = { workspace = true }
-apache-avro = "0.21"
+apache-avro = "0.22"
 serde_json = "1.0"

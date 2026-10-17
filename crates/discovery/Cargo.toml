@@ -2,6 +2,7 @@
 name = "discovery"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "CIDR subnet scanning and static device discovery for SunSpec devices"

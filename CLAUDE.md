@@ -90,7 +90,9 @@ Dockerfiles' digests.
 - **`types` crate stays lightweight** — only `serde` as a dependency.
 - **Formatting**: `rustfmt.toml` enforces max width 100 and auto-reordered imports.
 - **Dual license**: MIT OR Apache-2.0.
-- **MSRV**: 1.88 (`rust-version` in workspace `Cargo.toml`).
+- **MSRV**: 1.88 (`rust-version` in workspace `Cargo.toml`, inherited by every crate with
+  `rust-version.workspace = true`). Resolver 3 makes `cargo update` and Dependabot prefer
+  dependency versions that support it; check a lockfile change with `cargo +1.88 check --locked`.
 
 ## Key Patterns
 
