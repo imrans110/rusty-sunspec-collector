@@ -13,6 +13,7 @@ use poller_actor::{run_device, DeviceConfig, DeviceHealth, Sample};
 use types::DeviceIdentity;
 
 use crate::config::CollectorConfig;
+use crate::health::Health;
 
 /// How long device tasks get to stop on their own before they are aborted.
 const STOP_GRACE: Duration = Duration::from_secs(10);
@@ -24,6 +25,7 @@ pub async fn run(
     config: CollectorConfig,
     sender: mpsc::Sender<Sample>,
     mut shutdown: watch::Receiver<bool>,
+    health_registry: Arc<Health>,
 ) {
     let mut tasks = JoinSet::new();
     let mut known: HashMap<DeviceIdentity, Arc<DeviceHealth>> = HashMap::new();
@@ -53,6 +55,7 @@ pub async fn run(
             info!(device = %identity.key(), "starting device poller");
             let health = Arc::new(DeviceHealth::default());
             known.insert(identity.clone(), health.clone());
+            health_registry.register_device(identity.key(), health.clone());
             tasks.spawn(run_device(
                 device_config(&config, identity),
                 sender.clone(),

@@ -44,3 +44,10 @@ acks = "all"
 compression = "zstd"
 timeout_ms = 5000
 enable_idempotence = true
+
+[metrics]
+port = 9090                     # serves /metrics (Prometheus) and /healthz
+
+[runtime]
+channel_capacity = 256          # samples queued between pollers and the buffer
+respawn_delay_ms = 1000         # base backoff before retrying a failed device

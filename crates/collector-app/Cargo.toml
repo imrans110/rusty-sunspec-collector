@@ -10,7 +10,7 @@ description = "SunSpec solar inverter telemetry collector"
 anyhow = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"

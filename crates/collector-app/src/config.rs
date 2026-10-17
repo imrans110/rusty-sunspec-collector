@@ -1,10 +1,12 @@
 use std::env;
+use std::fmt::Display;
 use std::fs;
 use std::net::Ipv4Addr;
 use std::path::Path;
+use std::str::FromStr;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use tracing::warn;
 
@@ -23,6 +25,10 @@ const DEFAULT_BUFFER_DRAIN_INTERVAL_MS: u64 = 500;
 const DEFAULT_BUFFER_MAX_ROWS: i64 = 1_000_000;
 const DEFAULT_BUFFER_MAX_AGE_S: u64 = 7 * 24 * 3_600;
 const DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS: u64 = 5_000;
+const DEFAULT_METRICS_PORT: u16 = 9090;
+
+const KAFKA_COMPRESSION: &[&str] = &["none", "gzip", "snappy", "lz4", "zstd"];
+const KAFKA_ACKS: &[&str] = &["0", "1", "-1", "all"];
 
 #[derive(Clone, Debug)]
 pub struct CollectorConfig {
@@ -32,7 +38,6 @@ pub struct CollectorConfig {
     pub base_address: u16,
     /// How often subnet discovery is repeated to pick up new devices.
     pub rescan_interval_s: u64,
-    pub discovery_unit_ids: Vec<u8>,
     pub channel_capacity: usize,
     pub respawn_delay_ms: u64,
     pub buffer_path: String,
@@ -51,6 +56,7 @@ pub struct CollectorConfig {
     pub kafka_timeout_ms: Option<u64>,
     pub kafka_topic: Option<String>,
     pub kafka_enable_idempotence: Option<bool>,
+    /// Port for `/metrics` and `/healthz` (0 picks a free port).
     pub metrics_port: u16,
 }
 
@@ -59,94 +65,104 @@ impl CollectorConfig {
         Self::load_with_path(None)
     }
 
+    /// Defaults, then the config file (`--config` or `SUNSPEC_CONFIG`), then
+    /// `SUNSPEC_*` environment variables. Unknown file keys and unparsable values are
+    /// errors, so typos fail at startup instead of silently using defaults.
     pub fn load_with_path(config_path: Option<String>) -> Result<Self> {
         let mut config = Self::default();
 
         if let Some(file_config) = load_file_config(config_path.as_deref())? {
-            apply_file_config(&mut config, file_config);
+            apply_file_config(&mut config, file_config)?;
         }
 
-        apply_env_overrides(&mut config);
+        apply_env_overrides(&mut config)?;
         Ok(config)
     }
 
     pub fn validate(&self) -> Result<()> {
         if self.discovery.port == 0 {
-            anyhow::bail!("discovery.port must be between 1 and 65535");
+            bail!("discovery.port must be between 1 and 65535");
         }
         if self.discovery.max_concurrency == 0 {
-            anyhow::bail!("discovery.max_concurrency must be >= 1");
+            bail!("discovery.max_concurrency must be >= 1");
         }
         if self.discovery.per_host_timeout_ms == 0 {
-            anyhow::bail!("discovery.per_host_timeout_ms must be >= 1");
+            bail!("discovery.per_host_timeout_ms must be >= 1");
+        }
+        if self.discovery.unit_ids.is_empty() {
+            bail!("discovery.unit_ids must list at least one unit ID");
         }
         validate_cidr(&self.discovery.subnet)?;
         if self.poller.poll_interval.as_millis() == 0 {
-            anyhow::bail!("poller.poll_interval_ms must be >= 1");
+            bail!("poller.poll_interval_ms must be >= 1");
         }
         if self.poller.request_timeout.as_millis() == 0 {
-            anyhow::bail!("poller.request_timeout_ms must be >= 1");
+            bail!("poller.request_timeout_ms must be >= 1");
         }
         if self.modbus.port == 0 {
-            anyhow::bail!("modbus.port must be between 1 and 65535");
+            bail!("modbus.port must be between 1 and 65535");
         }
-        if let Some(max_batch) = self.modbus.max_batch_size {
-            if max_batch == 0 {
-                anyhow::bail!("modbus.max_batch_size must be >= 1");
-            }
+        if self.modbus.max_batch_size == Some(0) {
+            bail!("modbus.max_batch_size must be >= 1");
         }
         if self.modbus.timeout_ms == 0 {
-            anyhow::bail!("modbus.timeout_ms must be >= 1");
+            bail!("modbus.timeout_ms must be >= 1");
         }
         if self.modbus.retry_backoff_ms == 0 {
-            anyhow::bail!("modbus.retry_backoff_ms must be >= 1");
+            bail!("modbus.retry_backoff_ms must be >= 1");
         }
         if self.modbus.retry_max_backoff_ms == 0 {
-            anyhow::bail!("modbus.retry_max_backoff_ms must be >= 1");
+            bail!("modbus.retry_max_backoff_ms must be >= 1");
         }
-        if let Some(delay) = self.modbus.inter_read_delay_ms {
-            if delay == 0 {
-                anyhow::bail!("modbus.inter_read_delay_ms must be >= 1 when set");
-            }
+        if self.modbus.inter_read_delay_ms == Some(0) {
+            bail!("modbus.inter_read_delay_ms must be >= 1 when set");
         }
         if self.rescan_interval_s == 0 {
-            anyhow::bail!("discovery.rescan_interval_s must be >= 1");
+            bail!("discovery.rescan_interval_s must be >= 1");
         }
-        if let Some(stall) = self.poller.stall_timeout {
-            if stall.is_zero() {
-                anyhow::bail!("poller.stall_timeout_ms must be >= 1 when set");
-            }
+        if self
+            .poller
+            .stall_timeout
+            .is_some_and(|stall| stall.is_zero())
+        {
+            bail!("poller.stall_timeout_ms must be >= 1 when set");
         }
         if self.channel_capacity == 0 {
-            anyhow::bail!("channel_capacity must be >= 1");
+            bail!("runtime.channel_capacity must be >= 1");
         }
         if self.respawn_delay_ms == 0 {
-            anyhow::bail!("respawn_delay_ms must be >= 1");
+            bail!("runtime.respawn_delay_ms must be >= 1");
         }
         if self.buffer_batch_size <= 0 {
-            anyhow::bail!("buffer.batch_size must be >= 1");
+            bail!("buffer.batch_size must be >= 1");
         }
         if self.buffer_drain_interval_ms == 0 {
-            anyhow::bail!("buffer.drain_interval_ms must be >= 1");
+            bail!("buffer.drain_interval_ms must be >= 1");
         }
         if self.buffer_max_rows <= 0 {
-            anyhow::bail!("buffer.max_rows must be >= 1");
+            bail!("buffer.max_rows must be >= 1");
         }
         if self.buffer_max_age_s == 0 {
-            anyhow::bail!("buffer.max_age_s must be >= 1");
+            bail!("buffer.max_age_s must be >= 1");
         }
-        if let Some(timeout_ms) = self.kafka_timeout_ms {
-            if timeout_ms == 0 {
-                anyhow::bail!("kafka.timeout_ms must be >= 1");
-            }
+        if self.kafka_timeout_ms == Some(0) {
+            bail!("kafka.timeout_ms must be >= 1");
         }
-        if let Some(ref brokers) = self.kafka_brokers {
-            if brokers.trim().is_empty() {
-                anyhow::bail!("kafka.brokers must be non-empty when set");
-            }
+        if self
+            .kafka_brokers
+            .as_ref()
+            .is_some_and(|brokers| brokers.trim().is_empty())
+        {
+            bail!("kafka.brokers must be non-empty when set");
         }
         if let Some(ref topic) = self.kafka_topic {
             validate_kafka_topic(topic)?;
+        }
+        if let Some(ref compression) = self.kafka_compression {
+            ensure_one_of("kafka.compression", compression, KAFKA_COMPRESSION)?;
+        }
+        if let Some(ref acks) = self.kafka_acks {
+            ensure_one_of("kafka.acks", acks, KAFKA_ACKS)?;
         }
 
         Ok(())
@@ -161,7 +177,6 @@ impl Default for CollectorConfig {
             poller: ActorConfig::default(),
             base_address: DEFAULT_BASE_ADDRESS,
             rescan_interval_s: DEFAULT_RESCAN_INTERVAL_S,
-            discovery_unit_ids: vec![1],
             channel_capacity: DEFAULT_CHANNEL_CAPACITY,
             respawn_delay_ms: DEFAULT_RESPAWN_DELAY_MS,
             buffer_path: DEFAULT_BUFFER_PATH.to_string(),
@@ -177,110 +192,134 @@ impl Default for CollectorConfig {
             kafka_timeout_ms: None,
             kafka_topic: None,
             kafka_enable_idempotence: None,
-            metrics_port: 9090,
+            metrics_port: DEFAULT_METRICS_PORT,
         }
     }
 }
 
-fn apply_env_overrides(config: &mut CollectorConfig) {
-    if let Ok(value) = env::var("SUNSPEC_SUBNET") {
-        config.discovery.subnet = value;
-    }
-
-    if let Ok(ids) = env::var("SUNSPEC_DISCOVERY_UNIT_IDS") {
-        config.discovery_unit_ids = parse_unit_id_list(&ids);
-        config.discovery.unit_ids = config.discovery_unit_ids.clone();
-    }
-
-    if let Some(port) = parse_env_u16("SUNSPEC_PORT") {
-        config.discovery.port = port;
-        config.modbus.port = port;
-    }
-
-    if let Some(timeout_ms) = parse_env_u64("SUNSPEC_REQUEST_TIMEOUT_MS") {
-        config.poller.request_timeout = Duration::from_millis(timeout_ms);
-    }
-
-    if let Some(interval_ms) = parse_env_u64("SUNSPEC_POLL_INTERVAL_MS") {
-        config.poller.poll_interval = Duration::from_millis(interval_ms);
-    }
-
-    if let Some(jitter_ms) = parse_env_u64("SUNSPEC_JITTER_MS") {
-        config.poller.jitter_ms = jitter_ms;
-    }
-
-    if let Some(max_batch) = parse_env_u16("SUNSPEC_MAX_BATCH_SIZE") {
-        config.modbus.max_batch_size = Some(max_batch);
-    }
-
-    if let Some(timeout_ms) = parse_env_u64("SUNSPEC_MODBUS_TIMEOUT_MS") {
-        config.modbus.timeout_ms = timeout_ms;
-    }
-
-    if let Ok(value) = env::var("SUNSPEC_STATIC_DEVICES") {
-        config.discovery.static_devices = parse_static_devices(&value);
-    }
-
-    if let Ok(value) = env::var("SUNSPEC_BUFFER_PATH") {
-        config.buffer_path = value;
-    }
-
-    if let Some(value) = parse_env_i64("SUNSPEC_BUFFER_BATCH_SIZE") {
-        config.buffer_batch_size = value.max(1);
-    }
-
-    if let Some(value) = parse_env_u64("SUNSPEC_BUFFER_DRAIN_MS") {
-        config.buffer_drain_interval_ms = value;
-    }
-    if let Some(value) = parse_env_i64("SUNSPEC_BUFFER_MAX_ROWS") {
-        config.buffer_max_rows = value;
-    }
-    if let Some(value) = parse_env_u64("SUNSPEC_BUFFER_MAX_AGE_S") {
-        config.buffer_max_age_s = value;
-    }
-    if let Some(value) = parse_env_u64("SUNSPEC_SHUTDOWN_DRAIN_TIMEOUT_MS") {
-        config.shutdown_drain_timeout_ms = value;
-    }
-
-    config.base_address = parse_env_u16("SUNSPEC_BASE_ADDRESS").unwrap_or(config.base_address);
-    if env::var_os("SUNSPEC_DISCOVERY_REG_COUNT").is_some() {
-        warn!("SUNSPEC_DISCOVERY_REG_COUNT is deprecated and ignored; models are discovered by walking the model chain");
-    }
-    config.rescan_interval_s =
-        parse_env_u64("SUNSPEC_RESCAN_INTERVAL_S").unwrap_or(config.rescan_interval_s);
-    if let Some(stall_ms) = parse_env_u64("SUNSPEC_STALL_TIMEOUT_MS") {
-        config.poller.stall_timeout = Some(Duration::from_millis(stall_ms));
-    }
-    config.channel_capacity =
-        parse_env_usize("SUNSPEC_CHANNEL_CAPACITY").unwrap_or(config.channel_capacity);
-    config.respawn_delay_ms =
-        parse_env_u64("SUNSPEC_RESPAWN_DELAY_MS").unwrap_or(config.respawn_delay_ms);
-
-    if let Ok(value) = env::var("SUNSPEC_KAFKA_BROKERS") {
-        config.kafka_brokers = Some(value);
-    }
-    if let Ok(value) = env::var("SUNSPEC_KAFKA_CLIENT_ID") {
-        config.kafka_client_id = Some(value);
-    }
-    if let Ok(value) = env::var("SUNSPEC_KAFKA_ACKS") {
-        config.kafka_acks = Some(value);
-    }
-    if let Ok(value) = env::var("SUNSPEC_KAFKA_COMPRESSION") {
-        config.kafka_compression = Some(value);
-    }
-    config.kafka_timeout_ms = parse_env_u64("SUNSPEC_KAFKA_TIMEOUT_MS").or(config.kafka_timeout_ms);
-    if let Ok(value) = env::var("SUNSPEC_KAFKA_TOPIC") {
-        config.kafka_topic = Some(value);
-    }
-    config.kafka_enable_idempotence =
-        parse_env_bool("SUNSPEC_KAFKA_IDEMPOTENCE").or(config.kafka_enable_idempotence);
-
-    if let Some(port) = parse_env_u16("SUNSPEC_METRICS_PORT") {
-        config.metrics_port = port;
+/// Reads and parses `key`; a set but unparsable value is an error naming the variable.
+fn env_parse<T>(key: &str) -> Result<Option<T>>
+where
+    T: FromStr,
+    T::Err: Display,
+{
+    match env::var(key) {
+        Ok(value) => value
+            .trim()
+            .parse()
+            .map(Some)
+            .map_err(|err| anyhow!("{key}={value:?} is invalid: {err}")),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(err) => Err(anyhow!("{key} is not valid unicode: {err}")),
     }
 }
 
+fn env_string(key: &str) -> Result<Option<String>> {
+    env_parse::<String>(key)
+}
+
+fn apply_env_overrides(config: &mut CollectorConfig) -> Result<()> {
+    if let Some(value) = env_string("SUNSPEC_SUBNET")? {
+        config.discovery.subnet = value;
+    }
+    if let Some(ids) = env_string("SUNSPEC_DISCOVERY_UNIT_IDS")? {
+        config.discovery.unit_ids =
+            parse_unit_id_list(&ids).context("SUNSPEC_DISCOVERY_UNIT_IDS")?;
+    }
+    if let Some(port) = env_parse("SUNSPEC_PORT")? {
+        config.discovery.port = port;
+        config.modbus.port = port;
+    }
+    if let Some(value) = env_parse("SUNSPEC_RESCAN_INTERVAL_S")? {
+        config.rescan_interval_s = value;
+    }
+    if let Some(value) = env_string("SUNSPEC_STATIC_DEVICES")? {
+        config.discovery.static_devices =
+            parse_static_devices(&value).context("SUNSPEC_STATIC_DEVICES")?;
+    }
+
+    if let Some(ms) = env_parse("SUNSPEC_REQUEST_TIMEOUT_MS")? {
+        config.poller.request_timeout = Duration::from_millis(ms);
+    }
+    if let Some(ms) = env_parse("SUNSPEC_POLL_INTERVAL_MS")? {
+        config.poller.poll_interval = Duration::from_millis(ms);
+    }
+    if let Some(ms) = env_parse("SUNSPEC_JITTER_MS")? {
+        config.poller.jitter_ms = ms;
+    }
+    if let Some(ms) = env_parse("SUNSPEC_STALL_TIMEOUT_MS")? {
+        config.poller.stall_timeout = Some(Duration::from_millis(ms));
+    }
+
+    if let Some(value) = env_parse("SUNSPEC_MAX_BATCH_SIZE")? {
+        config.modbus.max_batch_size = Some(value);
+    }
+    if let Some(ms) = env_parse("SUNSPEC_MODBUS_TIMEOUT_MS")? {
+        config.modbus.timeout_ms = ms;
+    }
+
+    if let Some(value) = env_parse("SUNSPEC_BASE_ADDRESS")? {
+        config.base_address = value;
+    }
+    if env::var_os("SUNSPEC_DISCOVERY_REG_COUNT").is_some() {
+        warn!("SUNSPEC_DISCOVERY_REG_COUNT is deprecated and ignored; models are discovered by walking the model chain");
+    }
+
+    if let Some(value) = env_string("SUNSPEC_BUFFER_PATH")? {
+        config.buffer_path = value;
+    }
+    if let Some(value) = env_parse("SUNSPEC_BUFFER_BATCH_SIZE")? {
+        config.buffer_batch_size = value;
+    }
+    if let Some(value) = env_parse("SUNSPEC_BUFFER_DRAIN_MS")? {
+        config.buffer_drain_interval_ms = value;
+    }
+    if let Some(value) = env_parse("SUNSPEC_BUFFER_MAX_ROWS")? {
+        config.buffer_max_rows = value;
+    }
+    if let Some(value) = env_parse("SUNSPEC_BUFFER_MAX_AGE_S")? {
+        config.buffer_max_age_s = value;
+    }
+    if let Some(value) = env_parse("SUNSPEC_SHUTDOWN_DRAIN_TIMEOUT_MS")? {
+        config.shutdown_drain_timeout_ms = value;
+    }
+
+    if let Some(value) = env_parse("SUNSPEC_CHANNEL_CAPACITY")? {
+        config.channel_capacity = value;
+    }
+    if let Some(value) = env_parse("SUNSPEC_RESPAWN_DELAY_MS")? {
+        config.respawn_delay_ms = value;
+    }
+    if let Some(port) = env_parse("SUNSPEC_METRICS_PORT")? {
+        config.metrics_port = port;
+    }
+
+    if let Some(value) = env_string("SUNSPEC_KAFKA_BROKERS")? {
+        config.kafka_brokers = Some(value);
+    }
+    if let Some(value) = env_string("SUNSPEC_KAFKA_CLIENT_ID")? {
+        config.kafka_client_id = Some(value);
+    }
+    if let Some(value) = env_string("SUNSPEC_KAFKA_ACKS")? {
+        config.kafka_acks = Some(value);
+    }
+    if let Some(value) = env_string("SUNSPEC_KAFKA_COMPRESSION")? {
+        config.kafka_compression = Some(value);
+    }
+    if let Some(value) = env_parse("SUNSPEC_KAFKA_TIMEOUT_MS")? {
+        config.kafka_timeout_ms = Some(value);
+    }
+    if let Some(value) = env_string("SUNSPEC_KAFKA_TOPIC")? {
+        config.kafka_topic = Some(value);
+    }
+    if let Some(value) = env_parse("SUNSPEC_KAFKA_IDEMPOTENCE")? {
+        config.kafka_enable_idempotence = Some(value);
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileConfig {
     discovery: Option<FileDiscoveryConfig>,
     poller: Option<FilePollerConfig>,
@@ -288,9 +327,12 @@ struct FileConfig {
     sunspec: Option<FileSunspecConfig>,
     buffer: Option<FileBufferConfig>,
     kafka: Option<FileKafkaConfig>,
+    metrics: Option<FileMetricsConfig>,
+    runtime: Option<FileRuntimeConfig>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileDiscoveryConfig {
     subnet: Option<String>,
     port: Option<u16>,
@@ -302,12 +344,14 @@ struct FileDiscoveryConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileDeviceConfig {
     ip: String,
     unit_id: Option<u8>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FilePollerConfig {
     poll_interval_ms: Option<u64>,
     request_timeout_ms: Option<u64>,
@@ -316,6 +360,7 @@ struct FilePollerConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileModbusConfig {
     port: Option<u16>,
     max_batch_size: Option<u16>,
@@ -327,12 +372,15 @@ struct FileModbusConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileSunspecConfig {
     base_address: Option<u16>,
+    /// Deprecated and ignored; accepted so existing files keep loading.
     discovery_register_count: Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileBufferConfig {
     path: Option<String>,
     batch_size: Option<i64>,
@@ -343,6 +391,7 @@ struct FileBufferConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileKafkaConfig {
     brokers: Option<String>,
     topic: Option<String>,
@@ -353,12 +402,25 @@ struct FileKafkaConfig {
     enable_idempotence: Option<bool>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileMetricsConfig {
+    port: Option<u16>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileRuntimeConfig {
+    channel_capacity: Option<usize>,
+    respawn_delay_ms: Option<u64>,
+}
+
 fn load_file_config(config_path: Option<&str>) -> Result<Option<FileConfig>> {
     let path = match config_path {
         Some(path) => path.to_string(),
-        None => match env::var("SUNSPEC_CONFIG") {
-            Ok(value) => value,
-            Err(_) => return Ok(None),
+        None => match env_string("SUNSPEC_CONFIG")? {
+            Some(value) => value,
+            None => return Ok(None),
         },
     };
 
@@ -368,58 +430,65 @@ fn load_file_config(config_path: Option<&str>) -> Result<Option<FileConfig>> {
         .and_then(|value| value.to_str());
 
     let config = match ext {
-        Some("json") => serde_json::from_str(&content).context("parse json config")?,
-        _ => toml::from_str(&content).context("parse toml config")?,
+        Some("json") => {
+            serde_json::from_str(&content).with_context(|| format!("parse json config {path}"))?
+        }
+        _ => toml::from_str(&content).with_context(|| format!("parse toml config {path}"))?,
     };
 
     Ok(Some(config))
 }
 
-fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) {
+fn set<T>(target: &mut T, value: Option<T>) {
+    if let Some(value) = value {
+        *target = value;
+    }
+}
+
+fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) -> Result<()> {
     if let Some(discovery) = file.discovery {
-        if let Some(subnet) = discovery.subnet {
-            config.discovery.subnet = subnet;
-        }
-        if let Some(ids) = discovery.unit_ids {
-            config.discovery_unit_ids = ids.clone();
-            config.discovery.unit_ids = ids;
-        }
+        set(&mut config.discovery.subnet, discovery.subnet);
+        set(&mut config.discovery.unit_ids, discovery.unit_ids);
         if let Some(port) = discovery.port {
             config.discovery.port = port;
             config.modbus.port = port;
         }
-        if let Some(max) = discovery.max_concurrency {
-            config.discovery.max_concurrency = max;
-        }
-        if let Some(timeout) = discovery.per_host_timeout_ms {
-            config.discovery.per_host_timeout_ms = timeout;
-        }
-        if let Some(interval) = discovery.rescan_interval_s {
-            config.rescan_interval_s = interval;
-        }
+        set(
+            &mut config.discovery.max_concurrency,
+            discovery.max_concurrency,
+        );
+        set(
+            &mut config.discovery.per_host_timeout_ms,
+            discovery.per_host_timeout_ms,
+        );
+        set(&mut config.rescan_interval_s, discovery.rescan_interval_s);
         if let Some(devices) = discovery.static_devices {
             config.discovery.static_devices = devices
                 .into_iter()
-                .map(|device| DeviceIdentity {
-                    ip: device.ip,
-                    unit_id: device.unit_id.unwrap_or(1),
+                .map(|device| {
+                    validate_host(&device.ip)?;
+                    Ok(DeviceIdentity {
+                        ip: device.ip,
+                        unit_id: device.unit_id.unwrap_or(1),
+                    })
                 })
-                .collect();
+                .collect::<Result<_>>()
+                .context("discovery.static_devices")?;
         }
     }
 
     if let Some(poller) = file.poller {
-        if let Some(interval_ms) = poller.poll_interval_ms {
-            config.poller.poll_interval = Duration::from_millis(interval_ms);
-        }
-        if let Some(timeout_ms) = poller.request_timeout_ms {
-            config.poller.request_timeout = Duration::from_millis(timeout_ms);
-        }
-        if let Some(jitter_ms) = poller.jitter_ms {
-            config.poller.jitter_ms = jitter_ms;
-        }
-        if let Some(stall_ms) = poller.stall_timeout_ms {
-            config.poller.stall_timeout = Some(Duration::from_millis(stall_ms));
+        set(
+            &mut config.poller.poll_interval,
+            poller.poll_interval_ms.map(Duration::from_millis),
+        );
+        set(
+            &mut config.poller.request_timeout,
+            poller.request_timeout_ms.map(Duration::from_millis),
+        );
+        set(&mut config.poller.jitter_ms, poller.jitter_ms);
+        if let Some(ms) = poller.stall_timeout_ms {
+            config.poller.stall_timeout = Some(Duration::from_millis(ms));
         }
     }
 
@@ -431,183 +500,160 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) {
         if let Some(max_batch) = modbus.max_batch_size {
             config.modbus.max_batch_size = Some(max_batch);
         }
-        if let Some(timeout_ms) = modbus.timeout_ms {
-            config.modbus.timeout_ms = timeout_ms;
-        }
-        if let Some(retry_count) = modbus.retry_count {
-            config.modbus.retry_count = retry_count;
-        }
-        if let Some(backoff) = modbus.retry_backoff_ms {
-            config.modbus.retry_backoff_ms = backoff;
-        }
-        if let Some(max_backoff) = modbus.retry_max_backoff_ms {
-            config.modbus.retry_max_backoff_ms = max_backoff;
-        }
+        set(&mut config.modbus.timeout_ms, modbus.timeout_ms);
+        set(&mut config.modbus.retry_count, modbus.retry_count);
+        set(&mut config.modbus.retry_backoff_ms, modbus.retry_backoff_ms);
+        set(
+            &mut config.modbus.retry_max_backoff_ms,
+            modbus.retry_max_backoff_ms,
+        );
         if let Some(delay) = modbus.inter_read_delay_ms {
             config.modbus.inter_read_delay_ms = Some(delay);
         }
     }
 
     if let Some(sunspec) = file.sunspec {
-        if let Some(base) = sunspec.base_address {
-            config.base_address = base;
-        }
+        set(&mut config.base_address, sunspec.base_address);
         if sunspec.discovery_register_count.is_some() {
             warn!("sunspec.discovery_register_count is deprecated and ignored; models are discovered by walking the model chain");
         }
     }
 
     if let Some(buffer) = file.buffer {
-        if let Some(path) = buffer.path {
-            config.buffer_path = path;
-        }
-        if let Some(batch) = buffer.batch_size {
-            config.buffer_batch_size = batch.max(1);
-        }
-        if let Some(interval) = buffer.drain_interval_ms {
-            config.buffer_drain_interval_ms = interval;
-        }
-        if let Some(max_rows) = buffer.max_rows {
-            config.buffer_max_rows = max_rows;
-        }
-        if let Some(max_age) = buffer.max_age_s {
-            config.buffer_max_age_s = max_age;
-        }
-        if let Some(timeout) = buffer.shutdown_drain_timeout_ms {
-            config.shutdown_drain_timeout_ms = timeout;
-        }
+        set(&mut config.buffer_path, buffer.path);
+        set(&mut config.buffer_batch_size, buffer.batch_size);
+        set(
+            &mut config.buffer_drain_interval_ms,
+            buffer.drain_interval_ms,
+        );
+        set(&mut config.buffer_max_rows, buffer.max_rows);
+        set(&mut config.buffer_max_age_s, buffer.max_age_s);
+        set(
+            &mut config.shutdown_drain_timeout_ms,
+            buffer.shutdown_drain_timeout_ms,
+        );
     }
 
     if let Some(kafka) = file.kafka {
-        if let Some(brokers) = kafka.brokers {
-            config.kafka_brokers = Some(brokers);
+        if kafka.brokers.is_some() {
+            config.kafka_brokers = kafka.brokers;
         }
-        if let Some(topic) = kafka.topic {
-            config.kafka_topic = Some(topic);
+        if kafka.topic.is_some() {
+            config.kafka_topic = kafka.topic;
         }
-        if let Some(client_id) = kafka.client_id {
-            config.kafka_client_id = Some(client_id);
+        if kafka.client_id.is_some() {
+            config.kafka_client_id = kafka.client_id;
         }
-        if let Some(acks) = kafka.acks {
-            config.kafka_acks = Some(acks);
+        if kafka.acks.is_some() {
+            config.kafka_acks = kafka.acks;
         }
-        if let Some(compression) = kafka.compression {
-            config.kafka_compression = Some(compression);
+        if kafka.compression.is_some() {
+            config.kafka_compression = kafka.compression;
         }
-        if let Some(timeout_ms) = kafka.timeout_ms {
-            config.kafka_timeout_ms = Some(timeout_ms);
+        if kafka.timeout_ms.is_some() {
+            config.kafka_timeout_ms = kafka.timeout_ms;
         }
-        if let Some(enable_idempotence) = kafka.enable_idempotence {
-            config.kafka_enable_idempotence = Some(enable_idempotence);
+        if kafka.enable_idempotence.is_some() {
+            config.kafka_enable_idempotence = kafka.enable_idempotence;
         }
     }
+
+    if let Some(metrics) = file.metrics {
+        set(&mut config.metrics_port, metrics.port);
+    }
+
+    if let Some(runtime) = file.runtime {
+        set(&mut config.channel_capacity, runtime.channel_capacity);
+        set(&mut config.respawn_delay_ms, runtime.respawn_delay_ms);
+    }
+    Ok(())
 }
 
-fn parse_env_u16(key: &str) -> Option<u16> {
-    env::var(key).ok().and_then(|value| value.parse().ok())
-}
-
-fn parse_env_u64(key: &str) -> Option<u64> {
-    env::var(key).ok().and_then(|value| value.parse().ok())
-}
-
-fn parse_env_usize(key: &str) -> Option<usize> {
-    env::var(key).ok().and_then(|value| value.parse().ok())
-}
-
-fn parse_env_i64(key: &str) -> Option<i64> {
-    env::var(key).ok().and_then(|value| value.parse().ok())
-}
-
-fn parse_env_bool(key: &str) -> Option<bool> {
-    env::var(key).ok().and_then(|value| value.parse().ok())
-}
-
-fn parse_static_devices(value: &str) -> Vec<DeviceIdentity> {
+/// Parses `host[:unit_id]` entries such as `192.168.1.20:1,inverter.local`.
+fn parse_static_devices(value: &str) -> Result<Vec<DeviceIdentity>> {
     value
         .split(',')
-        .filter_map(|entry| {
-            let trimmed = entry.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            let (ip, unit) = match trimmed.split_once(':') {
-                Some((ip, unit)) => (ip, unit.parse::<u8>().unwrap_or(1)),
-                None => (trimmed, 1),
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| {
+            let (host, unit_id) = match entry.rsplit_once(':') {
+                Some((host, unit)) => (
+                    host,
+                    unit.parse::<u8>()
+                        .map_err(|_| anyhow!("'{entry}': unit ID must be 0-255"))?,
+                ),
+                None => (entry, 1),
             };
-            Some(DeviceIdentity {
-                ip: ip.to_string(),
-                unit_id: unit,
+            validate_host(host).with_context(|| format!("'{entry}'"))?;
+            Ok(DeviceIdentity {
+                ip: host.to_string(),
+                unit_id,
             })
         })
         .collect()
 }
 
-fn parse_unit_id_list(value: &str) -> Vec<u8> {
+fn parse_unit_id_list(value: &str) -> Result<Vec<u8>> {
     value
         .split(',')
-        .filter_map(|entry| {
-            let trimmed = entry.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            trimmed.parse::<u8>().ok()
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| {
+            entry
+                .parse::<u8>()
+                .map_err(|_| anyhow!("'{entry}' is not a unit ID (0-255)"))
         })
         .collect()
+}
+
+fn validate_host(host: &str) -> Result<()> {
+    if host.is_empty() || host.contains(char::is_whitespace) {
+        bail!("device host must be a non-empty IP address or hostname");
+    }
+    Ok(())
+}
+
+fn ensure_one_of(name: &str, value: &str, allowed: &[&str]) -> Result<()> {
+    if allowed.contains(&value) {
+        Ok(())
+    } else {
+        bail!(
+            "{name} must be one of {}, got {value:?}",
+            allowed.join(", ")
+        )
+    }
 }
 
 fn validate_cidr(value: &str) -> Result<()> {
     let (addr, prefix) = value
         .split_once('/')
-        .ok_or_else(|| anyhow::anyhow!("discovery.subnet must be CIDR (e.g. 192.168.1.0/24)"))?;
+        .ok_or_else(|| anyhow!("discovery.subnet must be CIDR (e.g. 192.168.1.0/24)"))?;
     addr.parse::<Ipv4Addr>()
-        .map_err(|_| anyhow::anyhow!("discovery.subnet must be a valid IPv4 CIDR"))?;
+        .map_err(|_| anyhow!("discovery.subnet must be a valid IPv4 CIDR"))?;
     let prefix: u8 = prefix
         .parse()
-        .map_err(|_| anyhow::anyhow!("discovery.subnet must include a valid prefix length"))?;
+        .map_err(|_| anyhow!("discovery.subnet must include a valid prefix length"))?;
     if prefix > 32 {
-        anyhow::bail!("discovery.subnet prefix must be between 0 and 32");
+        bail!("discovery.subnet prefix must be between 0 and 32");
     }
     Ok(())
 }
 
 fn validate_kafka_topic(topic: &str) -> Result<()> {
     if topic.trim().is_empty() {
-        anyhow::bail!("kafka.topic must be non-empty when set");
+        bail!("kafka.topic must be non-empty when set");
     }
     if topic.len() > 249 {
-        anyhow::bail!("kafka.topic must be <= 249 characters");
+        bail!("kafka.topic must be <= 249 characters");
     }
     if topic
         .chars()
         .any(|ch| !ch.is_ascii_alphanumeric() && ch != '.' && ch != '_' && ch != '-')
     {
-        anyhow::bail!("kafka.topic contains invalid characters");
+        bail!("kafka.topic contains invalid characters");
     }
-    if !topic
-        .chars()
-        .next()
-        .map(|ch| ch.is_ascii_alphanumeric())
-        .unwrap_or(false)
-        || !topic
-            .chars()
-            .last()
-            .map(|ch| ch.is_ascii_alphanumeric())
-            .unwrap_or(false)
-    {
-        anyhow::bail!("kafka.topic must start and end with an alphanumeric character");
-    }
-    let bytes = topic.as_bytes();
-    for idx in 0..bytes.len() {
-        if bytes[idx] == b'.' {
-            let prev = idx.checked_sub(1).and_then(|i| bytes.get(i)).copied();
-            let next = bytes.get(idx + 1).copied();
-            let prev_ok = prev.map(|b| b.is_ascii_alphanumeric()).unwrap_or(false);
-            let next_ok = next.map(|b| b.is_ascii_alphanumeric()).unwrap_or(false);
-            if !prev_ok || !next_ok {
-                anyhow::bail!("kafka.topic '.' must be between alphanumeric characters");
-            }
-        }
+    if topic == "." || topic == ".." {
+        bail!("kafka.topic cannot be '.' or '..'");
     }
     Ok(())
 }

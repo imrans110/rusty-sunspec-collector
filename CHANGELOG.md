@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `/healthz` endpoint: 200 while ingest and the uplink are checking in, 503 otherwise, with JSON detail (`devices_up`, `devices_total`, heartbeat ages); the systemd watchdog is pinged only while healthy
+- `SUNSPEC_LOG_FORMAT=json` for one JSON object per log line; `RUST_LOG` filtering is explicit
+- `[metrics] port` and `[runtime] channel_capacity` / `respawn_delay_ms` config file sections
+- Prometheus help text for every metric; `*_seconds` metrics are real histograms with buckets
 - Edge decoding with the official SunSpec model definitions (models 1, 101–103, 111–113, 120–124, 160, 201–204, 802, bundled from github.com/sunspec/models under Apache-2.0): scale factors applied, "not implemented" sentinels mapped to null, strings trimmed, repeating groups named `group[i].Point`
 - `collector-app --print-schema` prints the Avro schema of published records (`crates/avro-kafka/schemas/sunspec_sample.avsc`)
 - `sunspec-sim` writes named points and runs a live demo (changing power, current, voltage, frequency and energy) in the binary
@@ -49,6 +53,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed unused `retry_count` column from buffer schema
 
 ### Changed
+- **Breaking:** config is strict. Unknown keys in the config file, unparsable `SUNSPEC_*` values (the error names the variable), invalid static devices (e.g. unit 300) and unsupported `kafka.compression` / `kafka.acks` values fail at startup instead of silently falling back to defaults
+- **Breaking:** metrics renamed to the `sunspec_` prefix with base units and `_total` counters: `sunspec_buffer_writes_total`, `sunspec_uplink_records_total`, `sunspec_uplink_errors_total`, `sunspec_uplink_publish_seconds`; the high-cardinality `batch_size` label is gone
+- Logs use ANSI colours only on a terminal; per-host discovery timeouts log at debug instead of warn
+- Kafka topic validation now matches Kafka's own rules
 - **Breaking:** Kafka records are now one Avro single-object message per sample (schema v2, `com.rusty.sunspec.v2.SunspecSample`), keyed by `host/unit_id`, with `content-type` and `schema-fingerprint` headers. Previously each message was an Avro container file mixing devices, with the schema embedded and no key. Records carry decoded `points` alongside the raw `registers`
 - **Breaking:** `model_name` uses the official SunSpec names (e.g. `inverter_three_phase` instead of `three_phase_inverter`)
 - Only records Kafka acknowledges are deleted from the buffer; undelivered records stay buffered and are retried first, and records that cannot be encoded are discarded and counted
@@ -71,6 +79,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - quick-xml 0.31 → 0.42
 
 ### Removed
+- `CollectorConfig::discovery_unit_ids` (duplicate of `discovery.unit_ids`)
 - Unused model-catalog code in `sunspec-parser` (the id/name/length JSON and XML parsers, `ModelCatalog`, `apply_scale`); the decoder and bundled definitions replace them
 
 ### Security

@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -10,6 +11,7 @@ use avro_kafka::{KafkaConfig, Publisher};
 use buffer::BufferStore;
 
 use crate::config::CollectorConfig;
+use crate::health::Health;
 use crate::uplink::UplinkConfig;
 use crate::{devices, ingest, metrics_server, retention, systemd, uplink};
 
@@ -35,13 +37,13 @@ pub async fn run_with_publisher(
     shutdown: impl Future<Output = ()>,
 ) -> Result<()> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    if let Some(handle) = metrics {
-        tokio::spawn(metrics_server::serve(
-            handle,
-            shutdown_rx.clone(),
-            config.metrics_port,
-        ));
-    }
+    let health = Arc::new(Health::default());
+    tokio::spawn(metrics_server::serve(
+        metrics,
+        health.clone(),
+        shutdown_rx.clone(),
+        config.metrics_port,
+    ));
 
     let buffer = BufferStore::new(&config.buffer_path)
         .await
@@ -52,6 +54,7 @@ pub async fn run_with_publisher(
         rx,
         buffer.clone(),
         publisher.topic().to_string(),
+        health.clone(),
     ));
     // The uplink stops only after ingest has persisted everything, then drains once more.
     let (uplink_stop_tx, uplink_stop_rx) = watch::channel(false);
@@ -64,6 +67,7 @@ pub async fn run_with_publisher(
             drain_interval: Duration::from_millis(config.buffer_drain_interval_ms),
             shutdown_drain_timeout: Duration::from_millis(config.shutdown_drain_timeout_ms),
         },
+        health.clone(),
     ));
     let retention = tokio::spawn(retention::run(
         buffer,
@@ -71,10 +75,15 @@ pub async fn run_with_publisher(
         Duration::from_secs(config.buffer_max_age_s),
         shutdown_rx.clone(),
     ));
-    let devices = tokio::spawn(devices::run(config, tx, shutdown_rx.clone()));
+    let devices = tokio::spawn(devices::run(
+        config,
+        tx,
+        shutdown_rx.clone(),
+        health.clone(),
+    ));
 
     systemd::notify_ready();
-    let watchdog = systemd::start_watchdog(shutdown_rx);
+    let watchdog = systemd::start_watchdog(health, shutdown_rx);
 
     shutdown.await;
     info!("shutdown signal received");
