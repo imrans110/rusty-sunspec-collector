@@ -3,6 +3,7 @@ pub mod config;
 mod devices;
 mod ingest;
 mod metrics_server;
+mod retention;
 mod systemd;
 mod uplink;
 

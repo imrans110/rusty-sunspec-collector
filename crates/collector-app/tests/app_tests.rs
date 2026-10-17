@@ -8,8 +8,8 @@ use poller_actor::PollSample;
 use sunspec_sim::{parse_models, SimConfig, SimHandle, UnitSpec, Unmapped};
 use types::DeviceIdentity;
 
-/// A collector polling the simulator every 100 ms whose uplink never drains, so the
-/// buffer holds everything collected.
+/// A collector polling the simulator every 100 ms whose uplink never drains (no
+/// periodic drain, no final drain), so the buffer holds everything collected.
 fn config(sim: &SimHandle, buffer_path: &str) -> CollectorConfig {
     let mut config = CollectorConfig::default();
     config.modbus.port = sim.port();
@@ -20,6 +20,7 @@ fn config(sim: &SimHandle, buffer_path: &str) -> CollectorConfig {
     config.respawn_delay_ms = 100;
     config.buffer_path = buffer_path.to_string();
     config.buffer_drain_interval_ms = 3_600_000;
+    config.shutdown_drain_timeout_ms = 0;
     config
 }
 
@@ -131,6 +132,48 @@ async fn subnet_mode_keeps_running_and_finds_devices_on_rescan() {
         !samples.is_empty(),
         "device that appeared later was found by a rescan"
     );
+    cleanup(&path);
+}
+
+#[tokio::test]
+async fn uplink_drains_a_backlog_without_pausing_between_batches() {
+    let path = temp_db_path("drain");
+    let sample = PollSample {
+        device: static_devices(&[1]).remove(0),
+        model_id: 103,
+        model_name: "three_phase_inverter".to_string(),
+        start: 40_070,
+        registers: vec![0; 52],
+        collected_at_ms: 0,
+    };
+    let payload = serde_json::to_vec(&sample).unwrap();
+    {
+        let buffer = BufferStore::new(&path).await.unwrap();
+        buffer
+            .enqueue_batch("sunspec.telemetry", &vec![payload; 5_000])
+            .await
+            .unwrap();
+    }
+    let mut config = CollectorConfig::default();
+    // No devices: a /32 with nothing listening on the Modbus port.
+    config.discovery.subnet = "127.0.0.1/32".to_string();
+    config.discovery.port = 9;
+    config.buffer_path = path.clone();
+    config.buffer_batch_size = 100;
+    config.buffer_drain_interval_ms = 500;
+    config.shutdown_drain_timeout_ms = 0;
+
+    // With the old fixed pause between batches this drained 100 rows per 500 ms,
+    // i.e. about 400 rows in 2 s.
+    run_for(config, Duration::from_secs(2)).await;
+
+    let remaining = BufferStore::new(&path)
+        .await
+        .unwrap()
+        .pending_count()
+        .await
+        .unwrap();
+    assert_eq!(remaining, 0, "5,000-row backlog should drain within 2 s");
     cleanup(&path);
 }
 

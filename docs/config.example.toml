@@ -31,7 +31,10 @@ base_address = 40000              # preferred base; 40000, 0 and 50000 are also 
 [buffer]
 path = "sunspec-buffer.sqlite"
 batch_size = 100
-drain_interval_ms = 500
+drain_interval_ms = 500         # pause between drains once the backlog is empty
+max_rows = 1000000              # drop oldest rows beyond this during long outages
+max_age_s = 604800              # drop rows older than 7 days during long outages
+shutdown_drain_timeout_ms = 5000  # keep draining this long on stop (0 = stop at once)
 
 [kafka]
 brokers = "localhost:9092"

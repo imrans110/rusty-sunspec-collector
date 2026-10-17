@@ -89,6 +89,61 @@ impl BufferStore {
         Ok(())
     }
 
+    /// Inserts many payloads in one transaction: one fsync instead of one per row,
+    /// which matters on flash storage.
+    pub async fn enqueue_batch<P: AsRef<[u8]>>(
+        &self,
+        topic: &str,
+        payloads: &[P],
+    ) -> Result<(), BufferError> {
+        if payloads.is_empty() {
+            return Ok(());
+        }
+        let created_at = unix_ms();
+        let mut tx = self.pool.begin().await?;
+        for payload in payloads {
+            sqlx::query(
+                "INSERT INTO telemetry_queue (topic, payload, created_at) VALUES (?, ?, ?)",
+            )
+            .bind(topic)
+            .bind(payload.as_ref())
+            .bind(created_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Deletes the oldest rows so at most `max_rows` remain. Returns rows deleted.
+    pub async fn trim_to_max_rows(&self, max_rows: i64) -> Result<u64, BufferError> {
+        let result = sqlx::query(
+            "DELETE FROM telemetry_queue WHERE id <= \
+             (SELECT id FROM telemetry_queue ORDER BY id DESC LIMIT 1 OFFSET ?)",
+        )
+        .bind(max_rows)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Deletes rows enqueued before `cutoff_unix_ms`. Returns rows deleted.
+    pub async fn delete_older_than(&self, cutoff_unix_ms: i64) -> Result<u64, BufferError> {
+        let result = sqlx::query("DELETE FROM telemetry_queue WHERE created_at < ?")
+            .bind(cutoff_unix_ms)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Enqueue time (Unix ms) of the oldest buffered row, if any.
+    pub async fn oldest_created_at(&self) -> Result<Option<i64>, BufferError> {
+        let row = sqlx::query("SELECT MIN(created_at) AS oldest FROM telemetry_queue")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.get::<Option<i64>, _>("oldest"))
+    }
+
     pub async fn dequeue_batch(&self, limit: i64) -> Result<Vec<BufferedMessage>, BufferError> {
         let rows =
             sqlx::query("SELECT id, topic, payload FROM telemetry_queue ORDER BY id ASC LIMIT ?")
