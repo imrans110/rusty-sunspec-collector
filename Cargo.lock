@@ -103,6 +103,7 @@ version = "0.4.0"
 dependencies = [
  "apache-avro",
  "rdkafka",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tracing",

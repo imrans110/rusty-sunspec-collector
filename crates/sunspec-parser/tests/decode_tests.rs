@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use sunspec_parser::{decode_model, model_definition, model_name, supported_models, PointType};
+use sunspec_parser::{
+    catalog, decode_model, decode_model_labeled, model_definition, model_info, model_name,
+    supported_models, PointType,
+};
 use types::PointValue;
 
 /// A model's registers (header included), zeroed, with `ID` and `L` filled in.
@@ -383,4 +386,136 @@ fn unimplemented_counts_produce_no_repetitions() {
     let points = points(705, &registers);
 
     assert!(points.keys().all(|name| !name.starts_with("Crv[")));
+}
+
+fn labels(model_id: u16, registers: &[u16]) -> HashMap<String, String> {
+    decode_model_labeled(model_id, registers)
+        .expect("model has a definition")
+        .labels
+        .into_iter()
+        .collect()
+}
+
+#[test]
+fn enum_and_bitfield_values_get_their_names() {
+    let mut registers = model_registers(103, 50);
+    set(&mut registers, 103, "St", &[4]);
+    set(&mut registers, 103, "Evt1", &[0, 0b101]);
+    set(&mut registers, 103, "Evt2", &[0, 0]);
+
+    let labels = labels(103, &registers);
+
+    assert_eq!(labels["St"], "MPPT");
+    assert_eq!(labels["Evt1"], "GROUND_FAULT,AC_DISCONNECT", "bits 0 and 2");
+    assert_eq!(labels["Evt2"], "", "no bit set");
+    assert!(
+        !labels.contains_key("W"),
+        "only enums and bitfields are labelled"
+    );
+    let decoded = decode_model_labeled(103, &registers).unwrap();
+    assert_eq!(decoded.points, decode_model(103, &registers).unwrap());
+}
+
+#[test]
+fn unknown_and_unimplemented_values_get_no_name_and_unnamed_bits_get_numbers() {
+    let mut registers = model_registers(103, 50);
+    set(&mut registers, 103, "St", &[99]);
+    set(&mut registers, 103, "StVnd", &[0xFFFF]);
+    set(&mut registers, 103, "Evt1", &[0x0010, 0x0001]);
+
+    let labels = labels(103, &registers);
+
+    assert!(!labels.contains_key("St"), "99 is not a defined state");
+    assert!(!labels.contains_key("StVnd"), "not implemented");
+    assert_eq!(labels["Evt1"], "GROUND_FAULT,bit20");
+}
+
+#[test]
+fn repeating_groups_are_labelled_per_instance() {
+    let mut registers = model_registers(160, 48);
+    set(&mut registers, 160, "N", &[2]);
+    // Modules start after 10 fixed registers and are 20 long; DCSt (an enum) is 17
+    // registers into a module (after ID, IDStr, DCA, DCV, DCW, DCWH, Tms and Tmp).
+    registers[10 + 20 + 17] = 4;
+
+    let labels = labels(160, &registers);
+
+    assert_eq!(
+        labels.get("module[1].DCSt").map(String::as_str),
+        Some("MPPT")
+    );
+}
+
+/// `module[3].DCA` -> `module[*].DCA`, as the catalog names repeating groups.
+fn wildcard(name: &str) -> String {
+    let mut out = String::new();
+    let mut in_index = false;
+    for ch in name.chars() {
+        match ch {
+            '[' => {
+                in_index = true;
+                out.push_str("[*]");
+            }
+            ']' => in_index = false,
+            _ if in_index => {}
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+#[test]
+fn the_catalog_describes_every_point_records_carry() {
+    let catalog = catalog();
+    assert_eq!(catalog.len(), supported_models().len());
+    for info in &catalog {
+        let model = model_definition(info.id).unwrap();
+        let fixed = model.group.fixed_size();
+        let mut registers = vec![0u16; fixed + 200];
+        registers[0] = info.id;
+        registers[1] = (fixed + 198) as u16;
+        let names: Vec<&str> = info
+            .points
+            .iter()
+            .map(|point| point.name.as_str())
+            .collect();
+        for (name, _) in decode_model(info.id, &registers).unwrap() {
+            assert!(
+                names.contains(&wildcard(&name).as_str()),
+                "model {}: {name} is not in the catalog",
+                info.id
+            );
+        }
+    }
+}
+
+#[test]
+fn the_catalog_carries_units_labels_and_symbols() {
+    let inverter = model_info(103).unwrap();
+    assert_eq!(inverter.name, "inverter_three_phase");
+    assert_eq!(inverter.label.as_deref(), Some("Inverter (Three Phase)"));
+    let amps = inverter
+        .points
+        .iter()
+        .find(|point| point.name == "A")
+        .unwrap();
+    assert_eq!(amps.units.as_deref(), Some("A"));
+    assert_eq!(amps.label.as_deref(), Some("Amps"));
+    let state = inverter
+        .points
+        .iter()
+        .find(|point| point.name == "St")
+        .unwrap();
+    assert!(state
+        .symbols
+        .iter()
+        .any(|symbol| symbol.name == "MPPT" && symbol.value == 4));
+    assert!(inverter.points.iter().all(|point| point.name != "W_SF"));
+
+    let mppt = model_info(160).unwrap();
+    assert!(mppt
+        .points
+        .iter()
+        .any(|point| point.name == "module[*].DCA"));
+    assert!(model_info(9_999).is_none());
 }

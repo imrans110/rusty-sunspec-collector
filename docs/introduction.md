@@ -113,9 +113,9 @@ Compose stack is running.
 
 - Kafka authentication is limited to SASL PLAIN and SCRAM (no Kerberos or OAuth).
 - No Schema Registry integration; records use fingerprint-based single-object encoding.
-- Point units and labels are not in the payload; look them up by model and point name in the
-  bundled SunSpec definitions.
-- No configuration reload; enum and bitfield points are published as integers.
+- Point units and descriptions are not in each record; they are in the model catalog
+  (`collector-app --print-models`, `/models`).
+- No configuration reload.
 - Delivery is at-least-once, so duplicates are possible after a crash.
 
 ---

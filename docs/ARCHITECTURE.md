@@ -98,7 +98,8 @@ sunspec-sim -- sunspec-parser
 
 `main()` in `crates/collector-app/src/main.rs`:
 
-1. If `--print-schema` is given, prints the Avro schema and exits.
+1. If `--print-schema` or `--print-models` is given, prints the Avro schema or the model catalog
+   and exits.
 2. Initialises logging (`RUST_LOG`, `SUNSPEC_LOG_FORMAT`).
 3. Installs the SIGINT/SIGTERM handler before loading the configuration, so a stop during startup
    still takes the graceful path.
@@ -318,8 +319,22 @@ SunSpec marks unimplemented points with a sentinel value. Sentinels become `Null
 | `eui48` | string of hex digits | all registers `0xFFFF` |
 | `ipv6addr` | string of hex digits | all registers `0` |
 
-Enums and bitfields are published as integers; their symbolic names are not expanded. An integer
-that does not fit an `i64` (a large `uint64` or `acc64`) is published as a double.
+Enums and bitfields are published as integers in `points`, and by name in `labels`
+(`decode_model_labeled`, in the same pass): an enum's symbol name for its value, or a bitfield's
+set bits by name, comma-separated, with `bit<n>` for a bit the definition does not name and an
+empty string when no bit is set. A value with no symbol, and a "not implemented" value, get no
+label. An integer that does not fit an `i64` (a large `uint64` or `acc64`) is published as a
+double.
+
+### Model catalog
+
+`sunspec_parser::catalog()` and `model_info(id)` describe every bundled model: its name, label and
+description, and each point records can carry, with its type, units, label, description and
+symbols. Point names match records, with `[*]` for a repeating group's index
+(`module[*].DCA`), and the header, scale factors and padding are left out as in records.
+`collector-app --print-models` prints the whole catalog, and the metrics port serves `/models` (an
+index) and `/models/{id}`. A test checks that every point name a record can carry, for every
+model, has a catalog entry.
 
 ### Scale factors
 
@@ -477,6 +492,7 @@ matters.
 | `start` | `int` | Register address of the model header |
 | `collected_at_ms` | `long` (`timestamp-millis`) | When the registers were read |
 | `points` | `map` of `["null", "double", "long", "string"]` | Decoded points by SunSpec name |
+| `labels` | `map` of `string`, default `{}` | Enum values and set bitfield bits by name (schema 2.1) |
 | `registers` | `array` of `int` | Raw registers, including the two header registers |
 
 Point semantics, as described in [SunSpec decoding](#sunspec-decoding):
@@ -489,8 +505,17 @@ Point semantics, as described in [SunSpec decoding](#sunspec-decoding):
 - the model header (`ID`, `L`), scale-factor points and padding are omitted;
 - models without a bundled definition have an empty `points` map; only `registers` is set.
 
-`points` is an Avro map, so its order is not preserved. Point units and labels are not in the
-record; look them up by model ID and point name in the bundled definitions.
+`points` and `labels` are Avro maps, so their order is not preserved. Point units, labels and
+descriptions are in the [model catalog](#model-catalog), by model ID and point name.
+
+### Schema evolution
+
+Changes that old readers can resolve, such as a new field with a default, keep the
+`com.rusty.sunspec.v2` namespace and get a minor schema version in the CHANGELOG (2.1 added
+`labels`). They still change the schema's fingerprint, so a consumer that resolves the writer
+schema by fingerprint needs the new schema (`collector-app --print-schema`) before it reads new
+records. A change that old readers cannot resolve would get a new namespace (`v3`) and a breaking
+CHANGELOG entry.
 
 A model 103 record, shown as JSON for readability (unions unwrapped, lists shortened):
 
@@ -504,6 +529,7 @@ A model 103 record, shown as JSON for readability (unions unwrapped, lists short
   "start": 40070,
   "collected_at_ms": 1760000000123,
   "points": { "A": 12.34, "PhVphA": 230.1, "W": 4321.0, "Hz": 50.0, "St": 4, "VA": null, ... },
+  "labels": { "St": "MPPT", "Evt1": "", ... },
   "registers": [103, 50, 1234, ...]
 }
 ```
@@ -804,9 +830,7 @@ restart loops.
 - Kafka authentication is limited to SASL PLAIN and SCRAM (no Kerberos or OAuth); certificates
   and passwords are read at startup, so rotating them needs a restart.
 - No Schema Registry integration; records use fingerprint-based single-object encoding.
-- Point metadata (units, labels) is not in the payload; consumers look it up by model and point
-  name in the bundled definitions.
-- Enum and bitfield points are published as integers, not expanded to their names.
+- Point units and descriptions are not in each record; they are in the model catalog.
 - No configuration reload (SIGHUP).
 - Delivery is at-least-once; duplicates are possible after a crash.
 - Subnet scanning is IPv4 only, and devices found by a scan are never removed from the set.

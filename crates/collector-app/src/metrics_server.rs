@@ -99,8 +99,8 @@ pub async fn bind(port: u16) -> std::io::Result<tokio::net::TcpListener> {
     tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await
 }
 
-/// Serves `/healthz`, `/devices` and, when a recorder is installed, `/metrics` until
-/// shutdown.
+/// Serves `/healthz`, `/devices`, `/models` and, when a recorder is installed,
+/// `/metrics` until shutdown.
 pub async fn serve(
     listener: tokio::net::TcpListener,
     handle: Option<PrometheusHandle>,
@@ -136,6 +136,32 @@ pub async fn serve(
                 }
             }),
         );
+    app = app
+        .route(
+            "/models",
+            get(|| async {
+                let index: Vec<serde_json::Value> = sunspec_parser::catalog()
+                    .into_iter()
+                    .map(|model| {
+                        serde_json::json!({ "id": model.id, "name": model.name, "label": model.label })
+                    })
+                    .collect();
+                Json(serde_json::json!({ "models": index }))
+            }),
+        )
+        .route(
+            "/models/{id}",
+            get(|Path(id): Path<u16>| async move {
+                match sunspec_parser::model_info(id) {
+                    Some(model) => Json(model).into_response(),
+                    None => (
+                        StatusCode::NOT_FOUND,
+                        Json(serde_json::json!({ "error": format!("no bundled definition for model {id}") })),
+                    )
+                        .into_response(),
+                }
+            }),
+        );
     app = app.route(
         "/healthz",
         get(move || {
@@ -155,7 +181,7 @@ pub async fn serve(
     }
 
     if let Ok(addr) = listener.local_addr() {
-        info!(%addr, "serving /metrics, /healthz and /devices");
+        info!(%addr, "serving /metrics, /healthz, /devices and /models");
     }
 
     if let Err(err) = axum::serve(listener, app)

@@ -26,6 +26,7 @@ async fn publishes_keyed_records_to_kafka() {
         registers: vec![103, 50],
         collected_at_ms: 1_700_000_000_000,
         points: vec![("W".to_string(), PointValue::Float(432.1))],
+        labels: vec![("St".to_string(), "MPPT".to_string())],
     };
 
     for result in publisher.publish(&[sample.clone(), sample]).await {

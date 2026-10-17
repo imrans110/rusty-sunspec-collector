@@ -4,12 +4,15 @@
 //! compile time. [`decode_model`] turns a model's raw registers into named points with
 //! scale factors applied and "not implemented" values mapped to null.
 
+mod catalog;
 mod decode;
 mod registry;
 
-pub use decode::decode_model;
+pub use catalog::{catalog, model_info, ModelInfo, PointInfo, SymbolInfo};
+pub use decode::{decode_model, decode_model_labeled, DecodedModel};
 pub use registry::{
-    model_definition, supported_models, Count, GroupDef, ModelDef, PointDef, PointType, ScaleFactor,
+    model_definition, supported_models, Count, GroupDef, ModelDef, PointDef, PointType,
+    ScaleFactor, SymbolDef,
 };
 
 /// The two registers ("SunS") that mark the start of a SunSpec register map.

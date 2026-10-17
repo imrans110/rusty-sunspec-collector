@@ -21,3 +21,4 @@ vendored-openssl = ["rdkafka/ssl-vendored"]
 [dev-dependencies]
 tokio = { workspace = true }
 apache-avro = "0.21"
+serde_json = "1.0"

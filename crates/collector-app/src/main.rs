@@ -11,11 +11,13 @@ use collector_app::CollectorConfig;
 const USAGE: &str = "\
 usage: collector-app [--config PATH]
        collector-app --probe HOST[:UNIT] [--keep-identifiers] [--config PATH]
-       collector-app --print-schema | --version | --help
+       collector-app --print-schema | --print-models | --version | --help
 
 --probe reads one device's SunSpec map once and prints it as JSON (for device reports and
 sunspec-sim --fixture). Serial numbers and network addresses are blanked unless
 --keep-identifiers is given. The port, timeouts and base address come from the config.
+--print-models prints the metadata of every bundled SunSpec model (labels, units,
+descriptions, enum and bitfield symbols) as JSON.
 
 Settings come from the config file (--config or SUNSPEC_CONFIG) and SUNSPEC_* environment
 variables; see https://imrans110.github.io/rusty-sunspec-collector/configuration.html";
@@ -26,6 +28,13 @@ async fn main() -> Result<()> {
         match arg.as_str() {
             "--print-schema" => {
                 println!("{}", avro_kafka::SCHEMA_JSON);
+                return Ok(());
+            }
+            "--print-models" => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&sunspec_parser::catalog())?
+                );
                 return Ok(());
             }
             "--version" | "-V" => {

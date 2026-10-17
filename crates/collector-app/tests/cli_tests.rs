@@ -80,3 +80,25 @@ fn probe_rejects_a_bad_target() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("--probe"));
 }
+
+#[test]
+fn print_models_prints_the_catalog() {
+    let catalog: serde_json::Value =
+        serde_json::from_str(&run(&["--print-models"])).expect("catalog is JSON");
+    let models = catalog.as_array().expect("array of models");
+    assert!(models.len() >= 112);
+    let inverter = models.iter().find(|model| model["id"] == 103).unwrap();
+    assert_eq!(inverter["name"], "inverter_three_phase");
+    let state = inverter["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|point| point["name"] == "St")
+        .unwrap();
+    assert_eq!(state["type"], "enum16");
+    assert!(state["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|symbol| symbol["name"] == "MPPT" && symbol["value"] == 4));
+}
