@@ -10,7 +10,30 @@ Delivery is at-least-once: a buffered sample is deleted only after Kafka acknowl
 buffer is bounded by row count and age, so during a very long outage the oldest samples are
 dropped (and counted) instead of growing the buffer without limit.
 
-![Collector architecture diagram](docs/assets/arch.svg)
+```mermaid
+flowchart LR
+    subgraph field["Field"]
+        devices["<b>SunSpec devices</b><br/>inverters · meters<br/>batteries"]
+        serial["<b>RS-485 devices</b><br/>behind a serial<br/>converter"]
+    end
+
+    subgraph app["collector-app"]
+        pollers["<b>Device pollers</b><br/>one per device<br/>discover · poll · decode"]
+        buffer[("<b>SQLite buffer</b><br/>batched writes<br/>retention")]
+        uplink["<b>Uplink</b><br/>Avro records<br/>at-least-once"]
+        api["<b>HTTP</b><br/>/metrics · /healthz<br/>/devices · /models"]
+        pollers -- "bounded<br/>channel" --> buffer --> uplink
+        pollers -.-> api
+    end
+
+    devices -- "Modbus TCP" --> pollers
+    serial -- "RTU over TCP" --> pollers
+    uplink -- "keyed by<br/>device" --> kafka[("<b>Kafka</b>")]
+    api -.-> observers["Prometheus<br/>Grafana · curl"]
+
+    classDef external stroke-dasharray: 5 4
+    class devices,serial,kafka,observers external
+```
 
 ## Features
 
