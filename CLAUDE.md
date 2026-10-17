@@ -21,7 +21,7 @@ crates/
 ## Build & Test
 
 ```sh
-# Prerequisites: Rust 1.80+, cmake, libssl-dev, pkg-config
+# Prerequisites: Rust 1.88+, cmake, libssl-dev, pkg-config
 cargo build --workspace
 cargo test --workspace
 ```
@@ -44,7 +44,7 @@ cargo audit
 - **`types` crate stays lightweight** — only `serde` as a dependency.
 - **Formatting**: `rustfmt.toml` enforces max width 100 and auto-reordered imports.
 - **Dual license**: MIT OR Apache-2.0.
-- **MSRV**: 1.80 (set in workspace `Cargo.toml`).
+- **MSRV**: 1.88 (set in workspace `Cargo.toml`).
 
 ## Key Patterns
 

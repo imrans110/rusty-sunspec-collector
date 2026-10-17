@@ -31,7 +31,7 @@ docker run -p 9090:9090 --env-file .env -v sunspec-data:/app/data sunspec-collec
 ### Local development
 
 ```sh
-# Prerequisites: Rust 1.80+, cmake, libssl-dev, pkg-config
+# Prerequisites: Rust 1.88+, cmake, libssl-dev, pkg-config
 cargo build --workspace
 cargo test --workspace
 cargo run -p collector-app -- --config docs/config.example.toml

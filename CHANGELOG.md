@@ -35,8 +35,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed `#![allow(dead_code)]` from all 7 library crates
 - `Cargo.lock` is now committed (removed from `.gitignore` and `.dockerignore`)
 - mdBook version pinned to 0.4.40 in deploy workflow
-- MSRV set to 1.80 in workspace `Cargo.toml`
+- MSRV raised to 1.88 in workspace `Cargo.toml` and the Docker builder image (required by quick-xml 0.42 and apache-avro 0.21)
 - `rustfmt.toml` expanded with `max_width`, `reorder_imports`, `reorder_modules`
+- sqlx 0.7 → 0.8, built with only the `sqlite` and `runtime-tokio` features (no TLS stack or unused MySQL/Postgres drivers)
+- quick-xml 0.31 → 0.42
+
+### Security
+- Resolved all `cargo audit` vulnerabilities: RUSTSEC-2024-0363 (sqlx), RUSTSEC-2023-0071 (rsa, via the unused sqlx MySQL driver), RUSTSEC-2026-0346/0349 (rustls 0.21), RUSTSEC-2026-0098/0099/0104 (rustls-webpki 0.101), RUSTSEC-2026-0194/0195 (quick-xml), RUSTSEC-2026-0007 (bytes), RUSTSEC-2026-0204 (crossbeam-epoch)
 
 ## [0.1.0] - 2024-12-23
 

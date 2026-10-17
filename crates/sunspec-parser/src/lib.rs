@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use quick_xml::events::Event;
-use quick_xml::Reader;
+use quick_xml::{Reader, XmlVersion};
 use serde::Deserialize;
 use thiserror::Error;
 use tracing::warn;
@@ -115,7 +115,7 @@ pub fn parse_models_from_json(data: &str) -> Result<Vec<ModelDefinition>, Parser
 
 pub fn parse_models_from_xml(data: &str) -> Result<Vec<ModelDefinition>, ParserError> {
     let mut reader = Reader::from_str(data);
-    reader.trim_text(true);
+    reader.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
     let mut models = Vec::new();
@@ -123,7 +123,7 @@ pub fn parse_models_from_xml(data: &str) -> Result<Vec<ModelDefinition>, ParserE
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref event) | Event::Empty(ref event))
-                if event.name().as_ref() == b"model" =>
+                if event.name().as_ref() == "model" =>
             {
                 let mut id = None;
                 let mut name = None;
@@ -132,19 +132,19 @@ pub fn parse_models_from_xml(data: &str) -> Result<Vec<ModelDefinition>, ParserE
                 for attr in event.attributes() {
                     let attr = attr.map_err(|e| ParserError::InvalidAttribute(e.to_string()))?;
                     let key = attr.key.as_ref();
-                    let value = attr.unescape_value()?.into_owned();
+                    let value = attr.normalized_value(XmlVersion::Implicit1_0)?.into_owned();
 
                     match key {
-                        b"id" => {
+                        "id" => {
                             id =
                                 Some(value.parse::<u16>().map_err(|_| {
                                     ParserError::InvalidAttribute("id".to_string())
                                 })?);
                         }
-                        b"name" => {
+                        "name" => {
                             name = Some(value);
                         }
-                        b"len" | b"length" => {
+                        "len" | "length" => {
                             length = Some(value.parse::<u16>().map_err(|_| {
                                 ParserError::InvalidAttribute("length".to_string())
                             })?);

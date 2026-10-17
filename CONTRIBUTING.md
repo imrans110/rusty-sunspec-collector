@@ -5,7 +5,7 @@ Thank you for your interest in contributing to Rusty SunSpec Collector.
 ## Getting Started
 
 1. Fork the repository and clone it locally
-2. Install prerequisites: Rust 1.80+, cmake, libssl-dev, pkg-config
+2. Install prerequisites: Rust 1.88+, cmake, libssl-dev, pkg-config
 3. Build: `cargo build --workspace`
 4. Test: `cargo test --workspace`
 

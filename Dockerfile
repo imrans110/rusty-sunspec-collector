@@ -1,5 +1,5 @@
 # Build Stage
-FROM rust:1.80-slim-bookworm AS builder
+FROM rust:1.88-slim-bookworm AS builder
 
 # Install build dependencies
 # cmake is required for rdkafka-sys; librdkafka 2.12 also needs the curl headers to compile
