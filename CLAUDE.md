@@ -59,7 +59,8 @@ images, runs kafka + simulator + collector with compose, waits for `/healthz`, c
 keyed `simulator/1` and `simulator/2`, runs the ignored Kafka tests, and checks a clean SIGTERM
 exit (code 0, "collector stopped" logged). `release.yml` cross-compiles x86_64 and aarch64 archives, tests `scripts/install.sh` under
 systemd and builds multi-arch images; it publishes only on a `v*` tag (never push tags without
-the owner's approval).
+the owner's approval). On a tag (and on manual runs) it attests the release files and images with
+`actions/attest` and publishes the bundle as `sunspec-collector-<version>.intoto.jsonl`.
 
 On pull requests, a `Changes` job gates the jobs: Check & Lint, Test and Docker E2E run only
 when code changed (crates, Cargo files, Docker files, compose, `fixtures/`, `ci.yml`, or the docs

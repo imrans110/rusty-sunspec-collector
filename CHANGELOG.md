@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Model catalog: `collector-app --print-models` prints, and `GET /models` and `/models/{id}` serve, every bundled model's points with type, units, label, description and enum/bitfield symbols; point names match records (`module[*].DCA` for repeating groups)
 - `/devices` and `/devices/{host}/{unit}` on the metrics port: each device's state, discovered and polled models, and the latest decoded reading of each polled model, as JSON. Only the latest reading per model is kept
 - Serial devices through serial-to-Ethernet converters: `modbus.framing = "rtu"` (also `SUNSPEC_MODBUS_FRAMING` and a per-device `framing`) speaks Modbus RTU frames over TCP. Units on the same converter share one connection, so their requests never overlap on the RS-485 bus; units sharing a converter must use the same `request_timeout_ms` and `max_batch_size`. `--probe` works through converters too
+- Signed build provenance for releases: the archives, `install.sh`, `SHA256SUMS` and both GHCR images are attested by the release workflow (SLSA provenance signed with Sigstore, verifiable with `gh attestation verify`), and each release includes the signed bundle `sunspec-collector-<version>.intoto.jsonl`
 - `sunspec-sim --rtu` and `sunspec_sim::start_rtu_over_tcp` simulate a converter (RTU framing with CRC; absent units stay silent); `ModbusClient::new` creates a client that connects on its first read
 
 ### Changed

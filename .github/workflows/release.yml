@@ -173,6 +173,11 @@ jobs:
     name: Assemble and test the install
     needs: [prepare, build]
     runs-on: ubuntu-latest
+    # Signing the provenance needs an OIDC token (Sigstore) and the attestations scope.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       CRATE_VERSION: ${{ needs.prepare.outputs.crate_version }}
@@ -232,6 +237,33 @@ jobs:
         if: always()
         run: sudo journalctl -u sunspec-collector --no-pager | tail -50
 
+      # SLSA build provenance for the release files, signed with a Sigstore certificate issued to
+      # this workflow and stored in the repository's attestations. The bundle is published too,
+      # so the files can be verified offline. Pull request and main dry runs skip it; a manual run
+      # attests, which tests these steps without a release.
+      - name: Attest the release files
+        id: attest
+        if: needs.prepare.outputs.publish == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/install.sh
+            dist/SHA256SUMS
+
+      - name: Verify the attestation
+        if: steps.attest.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          provenance="dist/sunspec-collector-$VERSION.intoto.jsonl"
+          jq -c . "$BUNDLE" > "$provenance"
+          for file in dist/*.tar.gz dist/install.sh dist/SHA256SUMS; do
+            gh attestation verify "$file" --bundle "$provenance" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
+
       - name: Write the release notes
         run: |
           {
@@ -275,6 +307,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Image provenance, pushed to GHCR next to the image.
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -353,6 +388,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build linux/amd64 and linux/arm64 (pushed on a tag)
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
@@ -363,6 +399,25 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
+
+      - name: Attest the image
+        if: env.PUBLISH == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          # Storage records are for organization artifact inventories.
+          create-storage-record: false
+
+      - name: Verify the image attestation
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+        run: |
+          gh attestation verify "oci://$IMAGE" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
 
   publish:
     name: Publish the GitHub Release
@@ -386,4 +441,5 @@ jobs:
           flags=()
           if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/install.sh dist/SHA256SUMS \
+            dist/*.intoto.jsonl \
             --verify-tag --title "$GITHUB_REF_NAME" --notes-file dist/RELEASE_NOTES.md "${flags[@]}"

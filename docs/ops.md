@@ -155,6 +155,9 @@ release, checks the archive's checksum, and installs:
 It runs `systemctl daemon-reload` but does not start or restart the service; after an upgrade, run
 `sudo systemctl restart sunspec-collector`. `SUNSPEC_VERSION=0.4.0` installs a specific release.
 To read the script first: `curl -fsSLO <url>`, read `install.sh`, then `sudo sh install.sh`.
+From 0.5.0 the release files and images are attested, so a downloaded `install.sh`, archive or
+`SHA256SUMS` can be checked with `gh attestation verify` first; see
+[Verifying a release](build.md#verifying-a-release).
 
 To install from a downloaded archive by hand, use the archive's files in the steps below instead
 of building.
