@@ -470,9 +470,9 @@ the change in the CHANGELOG.
   `Changed`, `Fixed`, `Removed` or `Security`.
 - Changes that need action from users (record format, metric names, config keys and validation)
   start with **Breaking:**.
-- Each crate sets its own `version` (all are `0.1.0`). The only release so far is `[0.1.0]`; there is
-  no release workflow. To cut a release, move the `[Unreleased]` entries under a new
-  `## [x.y.z] - YYYY-MM-DD` heading, bump the crate versions, and tag the commit.
+- All crates share one version, `version` under `[workspace.package]` in `Cargo.toml`. Releases are
+  published by `.github/workflows/release.yml` when a `v*` tag is pushed; the steps are in
+  [Cutting a release](build.md#cutting-a-release).
 - Dependabot opens weekly pull requests for Cargo dependencies (`deps` prefix) and GitHub Actions
   (`ci` prefix).
 

@@ -65,12 +65,12 @@ jobs:
               echo "::error::$GITHUB_REF_NAME points at a commit that is not on main"
               exit 1
             fi
+            scripts/changelog-section.sh "$version" > /dev/null
             notes_section=$version
           else
             version="$crate_version-dev.${GITHUB_SHA::7}"
             notes_section=Unreleased
           fi
-          scripts/changelog-section.sh "$notes_section" > /dev/null
           prerelease=false
           if [[ "$version" == *-* ]]; then prerelease=true; fi
           publish=false
@@ -249,7 +249,11 @@ jobs:
             echo "Each archive holds collector-app, sunspec-sim, the systemd unit, the environment file,"
             echo "an example config and the licenses; SHA256SUMS lists their checksums."
             echo
-            scripts/changelog-section.sh "$NOTES_SECTION"
+            # Right after a release the Unreleased section is empty, which is fine for a dry run.
+            if ! scripts/changelog-section.sh "$NOTES_SECTION"; then
+              if [ "$NOTES_SECTION" != Unreleased ]; then exit 1; fi
+              echo "_No unreleased changes._"
+            fi
           } > dist/RELEASE_NOTES.md
           cat dist/RELEASE_NOTES.md
 
