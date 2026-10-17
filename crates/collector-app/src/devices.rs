@@ -9,7 +9,7 @@ use tokio::time::{sleep, timeout};
 use tracing::{info, warn};
 
 use discovery::discover_subnet;
-use poller_actor::{run_device, DeviceConfig, DeviceHealth, Sample};
+use poller_actor::{run_device, DeviceHealth, Sample};
 use types::DeviceIdentity;
 
 use crate::config::CollectorConfig;
@@ -57,7 +57,7 @@ pub async fn run(
             known.insert(identity.clone(), health.clone());
             health_registry.register_device(identity.key(), health.clone());
             tasks.spawn(run_device(
-                device_config(&config, identity),
+                config.device_config(identity),
                 sender.clone(),
                 shutdown.clone(),
                 health,
@@ -87,16 +87,5 @@ pub async fn run(
         warn!("device pollers did not stop in time; aborting them");
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
-    }
-}
-
-fn device_config(config: &CollectorConfig, identity: DeviceIdentity) -> DeviceConfig {
-    let mut actor = config.poller.clone();
-    actor.respawn_delay = Duration::from_millis(config.respawn_delay_ms);
-    DeviceConfig {
-        identity,
-        modbus: config.modbus.clone(),
-        actor,
-        base_address: config.base_address,
     }
 }

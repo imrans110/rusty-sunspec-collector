@@ -175,8 +175,14 @@ A session is: connect, discover the model chain, then poll until something fails
 3. **Poll.** Polling runs on a fixed schedule with period `poller.poll_interval_ms` (missed ticks
    are skipped, not bunched). The first tick is offset by up to `poller.jitter_ms`, derived from the
    device identity, so devices sharing a network do not all poll at the same instant. In each cycle
-   every model is read in full, header included, and decoded (see
-   [SunSpec decoding](#sunspec-decoding)); each successful read produces one `Sample`.
+   every polled model that is due is read in full, header included, and decoded (see
+   [SunSpec decoding](#sunspec-decoding)); each successful read produces one `Sample`. The
+   device's `ModelSchedule` (from `poller.include_models`, `exclude_models` and
+   `model_intervals_s`, plus static-device overrides) decides which models are polled and which
+   are due: a model with an interval is due again on the first tick at least that long after its
+   last successful read, measured from the scheduled tick so intervals stay aligned with the
+   cycle. A cycle with nothing due does not contact the device and counts as progress for stall
+   detection.
 
 A session ends with one of these errors (`PollerError`):
 
@@ -185,6 +191,7 @@ A session ends with one of these errors (`PollerError`):
 | `Modbus` | Connect failure, or a timeout/transport error while discovering the model chain. |
 | `NoSunSpecMap` | No `SunS` marker at any candidate base address. |
 | `MalformedChain` | Address or length overflow, more than 256 models, or no models before the end marker. |
+| `NothingToPoll` | The include and exclude lists leave none of the discovered models; retried with backoff, rediscovering the chain each time. |
 | `TooManyFailedCycles` | 10 consecutive poll cycles in which at least one model read failed. |
 | `Stalled` | No successful read for the stall timeout (see below). |
 | `ChannelClosed` | The sample channel closed; only happens during shutdown. |
@@ -785,7 +792,7 @@ restart loops.
 - Point metadata (units, labels) is not in the payload; consumers look it up by model and point
   name in the bundled definitions.
 - Enum and bitfield points are published as integers, not expanded to their names.
-- No configuration reload (SIGHUP) and no per-device polling profiles (interval or model set).
+- No configuration reload (SIGHUP).
 - Delivery is at-least-once; duplicates are possible after a crash.
 - Subnet scanning is IPv4 only, and devices found by a scan are never removed from the set.
 - Running two collectors against the same devices duplicates polling and records; there is no

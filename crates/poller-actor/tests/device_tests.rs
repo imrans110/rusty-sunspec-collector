@@ -1,10 +1,11 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use modbus_client::{ClientConfig, ModbusClient};
 use poller_actor::{
     base_candidates, discover_models, run_device, ActorConfig, DeviceConfig, DeviceHealth,
-    PollerError, Sample,
+    ModelSchedule, PollerError, Sample,
 };
 use sunspec_sim::{parse_models, SimConfig, SimHandle, UnitSpec};
 use tokio::sync::{mpsc, watch};
@@ -175,4 +176,142 @@ async fn stalled_session_is_restarted() {
         .await
         .expect("stops on shutdown")
         .unwrap();
+}
+
+/// Runs one device for `duration`, then stops it and returns what it published.
+async fn run_for(
+    sim: &SimHandle,
+    actor: ActorConfig,
+    duration: Duration,
+) -> (Vec<Sample>, Arc<DeviceHealth>) {
+    let (tx, mut rx) = mpsc::channel::<Sample>(1024);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let health = Arc::new(DeviceHealth::default());
+    let task = tokio::spawn(run_device(
+        device(sim, 1, actor),
+        tx,
+        shutdown_rx,
+        health.clone(),
+    ));
+    tokio::time::sleep(duration).await;
+    shutdown_tx.send(true).unwrap();
+    timeout(Duration::from_secs(5), task)
+        .await
+        .expect("stops on shutdown")
+        .unwrap();
+    let mut samples = Vec::new();
+    while let Ok(sample) = rx.try_recv() {
+        samples.push(sample);
+    }
+    (samples, health)
+}
+
+fn samples_of(samples: &[Sample], model_id: u16) -> usize {
+    samples
+        .iter()
+        .filter(|sample| sample.model_id == model_id)
+        .count()
+}
+
+/// Poll reads of a model, not counting the discovery read of its header.
+fn poll_reads(sim: &SimHandle, model_id: u16) -> u64 {
+    sim.reads_at(1, sim.model_start(1, model_id).expect("model in map"))
+        .saturating_sub(1)
+}
+
+#[tokio::test]
+async fn slow_models_are_read_once_per_interval() {
+    let sim = start_sim(UnitSpec::with_models(1, parse_models("1,103,120").unwrap())).await;
+    let actor = ActorConfig {
+        models: ModelSchedule {
+            intervals: BTreeMap::from([(1, Duration::from_secs(1)), (120, Duration::from_secs(1))]),
+            ..Default::default()
+        },
+        ..fast_actor()
+    };
+
+    // 100 ms cycles for 2.5 s: model 103 about 25 times, the slow ones at 0, 1 and 2 s.
+    let (samples, _) = run_for(&sim, actor, Duration::from_millis(2_500)).await;
+
+    for slow in [1, 120] {
+        let reads = poll_reads(&sim, slow);
+        assert!((2..=4).contains(&reads), "model {slow} read {reads} times");
+        assert_eq!(samples_of(&samples, slow) as u64, reads);
+    }
+    let fast = poll_reads(&sim, 103);
+    assert!(fast >= 15, "model 103 read only {fast} times");
+    assert_eq!(samples_of(&samples, 103) as u64, fast);
+}
+
+#[tokio::test]
+async fn excluded_and_unlisted_models_are_never_read() {
+    let sim = start_sim(UnitSpec::with_models(
+        1,
+        parse_models("1,103,120,160:48").unwrap(),
+    ))
+    .await;
+    let actor = ActorConfig {
+        models: ModelSchedule {
+            include: Some(BTreeSet::from([103, 160])),
+            exclude: BTreeSet::from([160]),
+            ..Default::default()
+        },
+        ..fast_actor()
+    };
+
+    let (samples, _) = run_for(&sim, actor, Duration::from_millis(800)).await;
+
+    for skipped in [1, 120, 160] {
+        assert_eq!(poll_reads(&sim, skipped), 0, "model {skipped} was polled");
+    }
+    assert!(poll_reads(&sim, 103) >= 3);
+    assert!(samples.iter().all(|sample| sample.model_id == 103));
+}
+
+#[tokio::test]
+async fn idle_cycles_between_slow_reads_are_not_stalls() {
+    let sim = start_sim(UnitSpec::inverter(1)).await;
+    let actor = ActorConfig {
+        stall_timeout: Some(Duration::from_millis(400)),
+        models: ModelSchedule {
+            include: Some(BTreeSet::from([1])),
+            intervals: BTreeMap::from([(1, Duration::from_secs(60))]),
+            ..Default::default()
+        },
+        ..fast_actor()
+    };
+
+    let (samples, health) = run_for(&sim, actor, Duration::from_millis(1_500)).await;
+
+    assert_eq!(health.restarts(), 0, "nothing was due, so nothing stalled");
+    assert_eq!(poll_reads(&sim, 1), 1);
+    assert_eq!(samples.len(), 1);
+}
+
+#[tokio::test]
+async fn a_device_with_nothing_selected_is_retried_without_polling() {
+    let sim = start_sim(UnitSpec::inverter(1)).await;
+    let actor = ActorConfig {
+        models: ModelSchedule {
+            include: Some(BTreeSet::from([701])),
+            ..Default::default()
+        },
+        ..fast_actor()
+    };
+
+    let (samples, health) = run_for(&sim, actor, Duration::from_millis(600)).await;
+
+    assert!(samples.is_empty());
+    assert!(
+        health.restarts() >= 1,
+        "rediscovered in case the models change"
+    );
+    // Each session reads every model header once while discovering, and nothing more.
+    for model_id in [1, 103] {
+        let reads = sim.reads_at(1, sim.model_start(1, model_id).unwrap());
+        assert!(
+            reads <= health.restarts() + 1,
+            "model {model_id} read {reads} times"
+        );
+    }
 }

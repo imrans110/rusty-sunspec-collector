@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Display;
 use std::fs;
@@ -13,7 +14,7 @@ use tracing::warn;
 use avro_kafka::{KafkaSecurity, Secret};
 use discovery::DiscoveryConfig;
 use modbus_client::ClientConfig;
-use poller_actor::ActorConfig;
+use poller_actor::{ActorConfig, DeviceConfig, ModelSchedule};
 use types::DeviceIdentity;
 
 const DEFAULT_BASE_ADDRESS: u16 = 40_000;
@@ -28,6 +29,9 @@ const DEFAULT_BUFFER_MAX_AGE_S: u64 = 7 * 24 * 3_600;
 const DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_METRICS_PORT: u16 = 9090;
 
+/// SunSpec model IDs run from 1 to 65534; 65535 marks the end of the model chain.
+const MAX_MODEL_ID: u16 = 65_534;
+
 const KAFKA_COMPRESSION: &[&str] = &["none", "gzip", "snappy", "lz4", "zstd"];
 const KAFKA_ACKS: &[&str] = &["0", "1", "-1", "all"];
 const KAFKA_SECURITY_PROTOCOLS: &[&str] = &["plaintext", "ssl", "sasl_plaintext", "sasl_ssl"];
@@ -37,7 +41,11 @@ const KAFKA_SASL_MECHANISMS: &[&str] = &["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-51
 pub struct CollectorConfig {
     pub discovery: DiscoveryConfig,
     pub modbus: ClientConfig,
+    /// Poll settings for every device, including the model schedule
+    /// (`poller.include_models`, `exclude_models`, `model_intervals_s`).
     pub poller: ActorConfig,
+    /// Settings a `[[discovery.static_devices]]` entry overrides for that device.
+    pub device_overrides: HashMap<DeviceIdentity, DeviceOverrides>,
     pub base_address: u16,
     /// How often subnet discovery is repeated to pick up new devices.
     pub rescan_interval_s: u64,
@@ -65,6 +73,22 @@ pub struct CollectorConfig {
     pub metrics_port: u16,
 }
 
+/// Per-device settings from a `[[discovery.static_devices]]` entry; unset fields use
+/// the global value.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DeviceOverrides {
+    pub poll_interval: Option<Duration>,
+    pub request_timeout: Option<Duration>,
+    pub base_address: Option<u16>,
+    pub max_batch_size: Option<u16>,
+    /// Replaces `poller.include_models`.
+    pub include_models: Option<BTreeSet<u16>>,
+    /// Replaces `poller.exclude_models`.
+    pub exclude_models: Option<BTreeSet<u16>>,
+    /// Merged over `poller.model_intervals_s`, model by model.
+    pub model_intervals: BTreeMap<u16, Duration>,
+}
+
 impl CollectorConfig {
     pub fn load() -> Result<Self> {
         Self::load_with_path(None)
@@ -84,6 +108,33 @@ impl CollectorConfig {
         Ok(config)
     }
 
+    /// The settings one device runs with: the global ones, then its overrides.
+    pub fn device_config(&self, identity: DeviceIdentity) -> DeviceConfig {
+        let mut actor = self.poller.clone();
+        actor.respawn_delay = Duration::from_millis(self.respawn_delay_ms);
+        let mut modbus = self.modbus.clone();
+        let mut base_address = self.base_address;
+        if let Some(device) = self.device_overrides.get(&identity) {
+            set(&mut actor.poll_interval, device.poll_interval);
+            set(&mut actor.request_timeout, device.request_timeout);
+            set(&mut base_address, device.base_address);
+            if device.max_batch_size.is_some() {
+                modbus.max_batch_size = device.max_batch_size;
+            }
+            if device.include_models.is_some() {
+                actor.models.include = device.include_models.clone();
+            }
+            set(&mut actor.models.exclude, device.exclude_models.clone());
+            actor.models.intervals.extend(&device.model_intervals);
+        }
+        DeviceConfig {
+            identity,
+            modbus,
+            actor,
+            base_address,
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.discovery.port == 0 {
             bail!("discovery.port must be between 1 and 65535");
@@ -98,6 +149,12 @@ impl CollectorConfig {
             bail!("discovery.unit_ids must list at least one unit ID");
         }
         validate_cidr(&self.discovery.subnet)?;
+        let mut listed = HashSet::new();
+        for device in &self.discovery.static_devices {
+            if !listed.insert(device) {
+                bail!("discovery.static_devices lists {} twice", device.key());
+            }
+        }
         if self.poller.poll_interval.as_millis() == 0 {
             bail!("poller.poll_interval_ms must be >= 1");
         }
@@ -112,6 +169,23 @@ impl CollectorConfig {
                 bail!(
                     "modbus.max_batch_size must be between 1 and {} (Modbus protocol limit)",
                     modbus_client::MAX_REGISTERS_PER_READ
+                );
+            }
+        }
+        validate_schedule("poller", &self.poller.models)?;
+        for (identity, device) in &self.device_overrides {
+            validate_device(identity, device)?;
+            let schedule = self.device_config(identity.clone()).actor.models;
+            if let Some(model) = schedule
+                .include
+                .iter()
+                .flatten()
+                .find(|model| schedule.exclude.contains(model))
+            {
+                bail!(
+                    "discovery.static_devices {}: model {model} is both in include_models and \
+                     exclude_models (from the device entry or [poller])",
+                    identity.key()
                 );
             }
         }
@@ -188,6 +262,7 @@ impl Default for CollectorConfig {
             discovery: DiscoveryConfig::default(),
             modbus: ClientConfig::default(),
             poller: ActorConfig::default(),
+            device_overrides: HashMap::new(),
             base_address: DEFAULT_BASE_ADDRESS,
             rescan_interval_s: DEFAULT_RESCAN_INTERVAL_S,
             channel_capacity: DEFAULT_CHANNEL_CAPACITY,
@@ -250,6 +325,10 @@ fn apply_env_overrides(config: &mut CollectorConfig) -> Result<()> {
     if let Some(value) = env_string("SUNSPEC_STATIC_DEVICES")? {
         config.discovery.static_devices =
             parse_static_devices(&value).context("SUNSPEC_STATIC_DEVICES")?;
+        if !config.device_overrides.is_empty() {
+            warn!("SUNSPEC_STATIC_DEVICES replaces discovery.static_devices; per-device settings from the config file are ignored");
+            config.device_overrides.clear();
+        }
     }
 
     if let Some(ms) = env_parse("SUNSPEC_REQUEST_TIMEOUT_MS")? {
@@ -263,6 +342,19 @@ fn apply_env_overrides(config: &mut CollectorConfig) -> Result<()> {
     }
     if let Some(ms) = env_parse("SUNSPEC_STALL_TIMEOUT_MS")? {
         config.poller.stall_timeout = Some(Duration::from_millis(ms));
+    }
+    if let Some(value) = env_string("SUNSPEC_INCLUDE_MODELS")? {
+        let models = parse_model_list(&value).context("SUNSPEC_INCLUDE_MODELS")?;
+        // Empty (as in the shipped environment file) means every model.
+        config.poller.models.include = (!models.is_empty()).then_some(models);
+    }
+    if let Some(value) = env_string("SUNSPEC_EXCLUDE_MODELS")? {
+        config.poller.models.exclude =
+            parse_model_list(&value).context("SUNSPEC_EXCLUDE_MODELS")?;
+    }
+    if let Some(value) = env_string("SUNSPEC_MODEL_INTERVALS_S")? {
+        config.poller.models.intervals =
+            parse_model_intervals_env(&value).context("SUNSPEC_MODEL_INTERVALS_S")?;
     }
 
     if let Some(value) = env_parse("SUNSPEC_MAX_BATCH_SIZE")? {
@@ -397,6 +489,13 @@ struct FileDiscoveryConfig {
 struct FileDeviceConfig {
     ip: String,
     unit_id: Option<u8>,
+    poll_interval_ms: Option<u64>,
+    request_timeout_ms: Option<u64>,
+    base_address: Option<u16>,
+    max_batch_size: Option<u16>,
+    include_models: Option<Vec<u16>>,
+    exclude_models: Option<Vec<u16>>,
+    model_intervals_s: Option<BTreeMap<String, u64>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -406,6 +505,10 @@ struct FilePollerConfig {
     request_timeout_ms: Option<u64>,
     jitter_ms: Option<u64>,
     stall_timeout_ms: Option<u64>,
+    include_models: Option<Vec<u16>>,
+    exclude_models: Option<Vec<u16>>,
+    /// Model ID (as a string key, as TOML and JSON require) to seconds.
+    model_intervals_s: Option<BTreeMap<String, u64>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -524,17 +627,29 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) -> Result<(
         );
         set(&mut config.rescan_interval_s, discovery.rescan_interval_s);
         if let Some(devices) = discovery.static_devices {
-            config.discovery.static_devices = devices
-                .into_iter()
-                .map(|device| {
-                    validate_host(&device.ip)?;
-                    Ok(DeviceIdentity {
-                        ip: device.ip,
-                        unit_id: device.unit_id.unwrap_or(1),
-                    })
-                })
-                .collect::<Result<_>>()
-                .context("discovery.static_devices")?;
+            config.discovery.static_devices.clear();
+            config.device_overrides.clear();
+            for device in devices {
+                validate_host(&device.ip).context("discovery.static_devices")?;
+                let identity = DeviceIdentity {
+                    ip: device.ip,
+                    unit_id: device.unit_id.unwrap_or(1),
+                };
+                let name = format!("discovery.static_devices {}", identity.key());
+                let overrides = DeviceOverrides {
+                    poll_interval: device.poll_interval_ms.map(Duration::from_millis),
+                    request_timeout: device.request_timeout_ms.map(Duration::from_millis),
+                    base_address: device.base_address,
+                    max_batch_size: device.max_batch_size,
+                    include_models: device.include_models.map(BTreeSet::from_iter),
+                    exclude_models: device.exclude_models.map(BTreeSet::from_iter),
+                    model_intervals: parse_model_intervals(&name, device.model_intervals_s)?,
+                };
+                if overrides != DeviceOverrides::default() {
+                    config.device_overrides.insert(identity.clone(), overrides);
+                }
+                config.discovery.static_devices.push(identity);
+            }
         }
     }
 
@@ -550,6 +665,17 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) -> Result<(
         set(&mut config.poller.jitter_ms, poller.jitter_ms);
         if let Some(ms) = poller.stall_timeout_ms {
             config.poller.stall_timeout = Some(Duration::from_millis(ms));
+        }
+        let models = &mut config.poller.models;
+        if let Some(include) = poller.include_models {
+            models.include = Some(BTreeSet::from_iter(include));
+        }
+        set(
+            &mut models.exclude,
+            poller.exclude_models.map(BTreeSet::from_iter),
+        );
+        if poller.model_intervals_s.is_some() {
+            models.intervals = parse_model_intervals("poller", poller.model_intervals_s)?;
         }
     }
 
@@ -689,6 +815,60 @@ fn parse_static_devices(value: &str) -> Result<Vec<DeviceIdentity>> {
         .collect()
 }
 
+/// `model_intervals_s` keys are model IDs written as strings (TOML and JSON keys).
+fn parse_model_intervals(
+    section: &str,
+    intervals: Option<BTreeMap<String, u64>>,
+) -> Result<BTreeMap<u16, Duration>> {
+    intervals
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(model, seconds)| {
+            let model = model
+                .trim()
+                .parse::<u16>()
+                .map_err(|_| anyhow!("{section}.model_intervals_s: '{model}' is not a model ID"))?;
+            Ok((model, Duration::from_secs(seconds)))
+        })
+        .collect()
+}
+
+/// Parses `1=3600,120=3600` (model ID = seconds).
+fn parse_model_intervals_env(value: &str) -> Result<BTreeMap<u16, Duration>> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| {
+            let (model, seconds) = entry
+                .split_once('=')
+                .ok_or_else(|| anyhow!("'{entry}' must be model=seconds"))?;
+            let model = model
+                .trim()
+                .parse::<u16>()
+                .map_err(|_| anyhow!("'{entry}': '{model}' is not a model ID"))?;
+            let seconds = seconds
+                .trim()
+                .parse::<u64>()
+                .map_err(|_| anyhow!("'{entry}': '{seconds}' is not a number of seconds"))?;
+            Ok((model, Duration::from_secs(seconds)))
+        })
+        .collect()
+}
+
+fn parse_model_list(value: &str) -> Result<BTreeSet<u16>> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| {
+            entry
+                .parse::<u16>()
+                .map_err(|_| anyhow!("'{entry}' is not a model ID"))
+        })
+        .collect()
+}
+
 fn parse_unit_id_list(value: &str) -> Result<Vec<u8>> {
     value
         .split(',')
@@ -707,6 +887,81 @@ fn validate_host(host: &str) -> Result<()> {
         bail!("device host must be a non-empty IP address or hostname");
     }
     Ok(())
+}
+
+fn validate_model_ids<'a>(name: &str, models: impl IntoIterator<Item = &'a u16>) -> Result<()> {
+    if let Some(model) = models
+        .into_iter()
+        .find(|model| !(1..=MAX_MODEL_ID).contains(*model))
+    {
+        bail!("{name}: {model} is not a SunSpec model ID (1-{MAX_MODEL_ID})");
+    }
+    Ok(())
+}
+
+/// Checks one set of model settings; `section` is `poller` or a device entry.
+fn validate_model_settings(
+    section: &str,
+    include: Option<&BTreeSet<u16>>,
+    exclude: Option<&BTreeSet<u16>>,
+    intervals: &BTreeMap<u16, Duration>,
+) -> Result<()> {
+    if let Some(include) = include {
+        if include.is_empty() {
+            bail!("{section}.include_models must list at least one model (omit it to poll every model)");
+        }
+        validate_model_ids(&format!("{section}.include_models"), include)?;
+    }
+    if let Some(exclude) = exclude {
+        validate_model_ids(&format!("{section}.exclude_models"), exclude)?;
+    }
+    validate_model_ids(&format!("{section}.model_intervals_s"), intervals.keys())?;
+    if let Some((model, _)) = intervals.iter().find(|(_, every)| every.is_zero()) {
+        bail!("{section}.model_intervals_s: model {model} needs an interval of at least 1 second (omit it to poll every cycle)");
+    }
+    Ok(())
+}
+
+fn validate_schedule(section: &str, schedule: &ModelSchedule) -> Result<()> {
+    validate_model_settings(
+        section,
+        schedule.include.as_ref(),
+        Some(&schedule.exclude),
+        &schedule.intervals,
+    )?;
+    if let Some(model) = schedule
+        .include
+        .iter()
+        .flatten()
+        .find(|model| schedule.exclude.contains(model))
+    {
+        bail!("{section}: model {model} is in both include_models and exclude_models");
+    }
+    Ok(())
+}
+
+fn validate_device(identity: &DeviceIdentity, device: &DeviceOverrides) -> Result<()> {
+    let section = format!("discovery.static_devices {}", identity.key());
+    if device.poll_interval.is_some_and(|every| every.is_zero()) {
+        bail!("{section}: poll_interval_ms must be >= 1");
+    }
+    if device.request_timeout.is_some_and(|limit| limit.is_zero()) {
+        bail!("{section}: request_timeout_ms must be >= 1");
+    }
+    if let Some(max_batch) = device.max_batch_size {
+        if max_batch == 0 || max_batch > modbus_client::MAX_REGISTERS_PER_READ {
+            bail!(
+                "{section}: max_batch_size must be between 1 and {} (Modbus protocol limit)",
+                modbus_client::MAX_REGISTERS_PER_READ
+            );
+        }
+    }
+    validate_model_settings(
+        &section,
+        device.include_models.as_ref(),
+        device.exclude_models.as_ref(),
+        &device.model_intervals,
+    )
 }
 
 /// A secret given either directly or as `<name>_file` (a file holding only the secret,

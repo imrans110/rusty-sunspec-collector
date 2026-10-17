@@ -76,6 +76,13 @@ the owner's approval).
   discover → poll. On failure or stall, back off `respawn_delay_ms` × 2^(n−1), capped at 60 s, plus
   up to 10 % device-salted jitter; reset after a session that polled. Exits only on shutdown.
   Devices are keyed by host and unit ID.
+- **Polling profiles**: `poller_actor::ModelSchedule` (include, exclude, per-model intervals) on
+  `ActorConfig.models`, from `poller.include_models` / `exclude_models` / `model_intervals_s`
+  (env `SUNSPEC_INCLUDE_MODELS` etc.). Static device entries override poll interval, request
+  timeout, base address, max batch size and the model settings (`CollectorConfig::device_config`
+  merges them; intervals merge per model, lists replace). A slow model is due again on the first
+  tick ≥ interval after its last successful read; failed reads stay due. Idle cycles count as
+  progress for stall detection. `SimHandle::reads_at` counts reads per address for tests.
 - **Stall detection**: no successful read for `poller.stall_timeout_ms` (default
   max(10 × poll interval, 30 s)) aborts the session (`sunspec_poller_stalls_total`). 10 consecutive
   failed cycles also end a session.

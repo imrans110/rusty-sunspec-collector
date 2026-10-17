@@ -9,6 +9,14 @@ rescan_interval_s = 600           # subnet mode: rescan this often to find new d
 [[discovery.static_devices]]
 ip = "192.168.1.20"
 unit_id = 1
+# Per-device settings (see "Per-device settings" in docs/configuration.md):
+# poll_interval_ms = 5000
+# request_timeout_ms = 2000
+# base_address = 40000
+# max_batch_size = 60
+# include_models = [1, 103, 160]
+# exclude_models = [123]
+# model_intervals_s = { 160 = 10 }   # merged with [poller.model_intervals_s]
 
 [poller]
 poll_interval_ms = 1000
@@ -16,6 +24,15 @@ request_timeout_ms = 1000
 jitter_ms = 0                     # max random offset of each device's polling schedule
 # stall_timeout_ms = 30000         # restart a device with no successful read for this long
                                   # (default: max(10 x poll_interval, 30 s))
+# include_models = [1, 103, 160]   # poll only these models (default: every discovered model)
+# exclude_models = [123]           # never poll these models
+
+# Models that rarely change, read at most this often instead of every cycle
+# (model ID = seconds): common, nameplate and settings. Remove to read them every cycle.
+[poller.model_intervals_s]
+1 = 3600
+120 = 3600
+121 = 600
 
 [modbus]
 max_batch_size = 64             # capped at 125 (Modbus protocol limit)
