@@ -1,0 +1,53 @@
+name: Device report
+description: Tell us how the collector works with your inverter, meter or battery.
+title: "Device report: "
+labels: ["device report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Reports like this build the list of tested devices and show which vendor quirks need handling.
+        Working and non-working results are both useful.
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Vendor, model and firmware version.
+      placeholder: Vendor, model, firmware version
+    validations:
+      required: true
+  - type: input
+    id: connection
+    attributes:
+      label: Connection
+      description: Direct Modbus TCP or a gateway (which one), unit ID, and base address if not 40000.
+      placeholder: Direct TCP, port 502, unit 1
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Works with settings changes (describe below)
+        - Partly works
+        - Does not work
+    validations:
+      required: true
+  - type: textarea
+    id: models
+    attributes:
+      label: Discovered models
+      description: The `discovered SunSpec models` log line for this device.
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes and quirks
+      description: Settings you needed (timeouts, max_batch_size, base address), values that look wrong, errors you saw.
+  - type: input
+    id: version
+    attributes:
+      label: Collector version
+      placeholder: collector-app 0.2.0

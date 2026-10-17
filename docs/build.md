@@ -307,8 +307,8 @@ release files are kept as the run's artifacts (`archive-<target>` and `release`)
    git push origin v0.2.0
    ```
 
-4. The workflow publishes the images and the release. After the first release, make both GHCR
-   packages public (package settings, "Change visibility"), since new packages start private.
+4. The workflow publishes the images and the release. The GHCR packages are linked to this
+   public repository and take its visibility, so they can be pulled without logging in.
 
 ---
 
