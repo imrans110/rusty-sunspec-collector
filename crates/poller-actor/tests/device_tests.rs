@@ -45,6 +45,7 @@ fn device(sim: &SimHandle, unit_id: u8, actor: ActorConfig) -> DeviceConfig {
         },
         actor,
         base_address: 40_000,
+        shared_client: None,
     }
 }
 

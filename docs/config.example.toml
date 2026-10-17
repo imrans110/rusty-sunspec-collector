@@ -40,6 +40,7 @@ retry_count = 2
 retry_backoff_ms = 100
 retry_max_backoff_ms = 2000
 inter_read_delay_ms = 5
+# framing = "tcp"                 # "rtu" for RS-485 devices behind a serial-to-Ethernet converter
 
 [sunspec]
 base_address = 40000              # preferred base; 40000, 0 and 50000 are also probed

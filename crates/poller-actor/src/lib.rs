@@ -101,6 +101,10 @@ pub struct DeviceConfig {
     pub actor: ActorConfig,
     /// Preferred SunSpec base address; the other standard bases are tried after it.
     pub base_address: u16,
+    /// A client shared with the other units behind the same RTU-over-TCP converter, so
+    /// their requests never overlap on the serial bus. `None` opens a connection per
+    /// session.
+    pub shared_client: Option<Arc<ModbusClient>>,
 }
 
 #[derive(Debug, Error)]
@@ -340,12 +344,16 @@ async fn poll_device(
     modbus.host = identity.ip.clone();
     modbus.timeout_ms = config.actor.request_timeout.as_millis() as u64;
 
-    let client = match ModbusClient::connect(modbus).await {
-        Ok(client) => client,
-        Err(err) => {
-            count_error(&device, &err);
-            return err.into();
-        }
+    let client = match &config.shared_client {
+        // Connects on its first read; failures surface from discovery below.
+        Some(client) => client.clone(),
+        None => match ModbusClient::connect(modbus).await {
+            Ok(client) => Arc::new(client),
+            Err(err) => {
+                count_error(&device, &err);
+                return err.into();
+            }
+        },
     };
     let bases = base_candidates(config.base_address);
     let (base, models) = match discover_models(&client, identity.unit_id, &bases).await {

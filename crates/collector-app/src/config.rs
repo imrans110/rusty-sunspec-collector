@@ -13,7 +13,7 @@ use tracing::warn;
 
 use avro_kafka::{KafkaSecurity, Secret};
 use discovery::DiscoveryConfig;
-use modbus_client::ClientConfig;
+use modbus_client::{ClientConfig, Framing};
 use poller_actor::{ActorConfig, DeviceConfig, ModelSchedule};
 use types::DeviceIdentity;
 
@@ -81,6 +81,7 @@ pub struct DeviceOverrides {
     pub request_timeout: Option<Duration>,
     pub base_address: Option<u16>,
     pub max_batch_size: Option<u16>,
+    pub framing: Option<Framing>,
     /// Replaces `poller.include_models`.
     pub include_models: Option<BTreeSet<u16>>,
     /// Replaces `poller.exclude_models`.
@@ -121,6 +122,7 @@ impl CollectorConfig {
             if device.max_batch_size.is_some() {
                 modbus.max_batch_size = device.max_batch_size;
             }
+            set(&mut modbus.framing, device.framing);
             if device.include_models.is_some() {
                 actor.models.include = device.include_models.clone();
             }
@@ -132,6 +134,7 @@ impl CollectorConfig {
             modbus,
             actor,
             base_address,
+            shared_client: None,
         }
     }
 
@@ -155,6 +158,7 @@ impl CollectorConfig {
                 bail!("discovery.static_devices lists {} twice", device.key());
             }
         }
+        self.validate_rtu_converters()?;
         if self.poller.poll_interval.as_millis() == 0 {
             bail!("poller.poll_interval_ms must be >= 1");
         }
@@ -253,6 +257,50 @@ impl CollectorConfig {
         validate_kafka_security(&self.kafka_security)?;
 
         Ok(())
+    }
+}
+
+impl CollectorConfig {
+    /// Units behind one RTU-over-TCP converter share a single connection, so they must
+    /// agree on the settings that connection uses.
+    fn validate_rtu_converters(&self) -> Result<()> {
+        let mut converters: HashMap<(&str, u16), (String, Duration, Option<u16>)> = HashMap::new();
+        for identity in &self.discovery.static_devices {
+            let device = self.device_config(identity.clone());
+            if device.modbus.framing != Framing::Rtu {
+                continue;
+            }
+            let settings = (
+                identity.key(),
+                device.actor.request_timeout,
+                device.modbus.max_batch_size,
+            );
+            match converters.get(&(identity.ip.as_str(), device.modbus.port)) {
+                Some((first, timeout, batch)) if (*timeout, *batch) != (settings.1, settings.2) => {
+                    bail!(
+                        "discovery.static_devices {} and {first} share the RTU converter at {}:{}, \
+                         so they need the same request_timeout_ms and max_batch_size",
+                        identity.key(),
+                        identity.ip,
+                        device.modbus.port
+                    );
+                }
+                Some(_) => {}
+                None => {
+                    converters.insert((identity.ip.as_str(), device.modbus.port), settings);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `tcp` (Modbus TCP) or `rtu` (RTU frames over TCP, for serial converters).
+fn parse_framing(name: &str, value: &str) -> Result<Framing> {
+    match value.trim() {
+        "tcp" => Ok(Framing::Tcp),
+        "rtu" => Ok(Framing::Rtu),
+        other => bail!("{name} must be tcp or rtu, got {other:?}"),
     }
 }
 
@@ -359,6 +407,9 @@ fn apply_env_overrides(config: &mut CollectorConfig) -> Result<()> {
 
     if let Some(value) = env_parse("SUNSPEC_MAX_BATCH_SIZE")? {
         config.modbus.max_batch_size = Some(value);
+    }
+    if let Some(value) = env_string("SUNSPEC_MODBUS_FRAMING")? {
+        config.modbus.framing = parse_framing("SUNSPEC_MODBUS_FRAMING", &value)?;
     }
     if env::var_os("SUNSPEC_MODBUS_TIMEOUT_MS").is_some() {
         warn!(
@@ -493,6 +544,7 @@ struct FileDeviceConfig {
     request_timeout_ms: Option<u64>,
     base_address: Option<u16>,
     max_batch_size: Option<u16>,
+    framing: Option<String>,
     include_models: Option<Vec<u16>>,
     exclude_models: Option<Vec<u16>>,
     model_intervals_s: Option<BTreeMap<String, u64>>,
@@ -523,6 +575,8 @@ struct FileModbusConfig {
     retry_backoff_ms: Option<u64>,
     retry_max_backoff_ms: Option<u64>,
     inter_read_delay_ms: Option<u64>,
+    /// `tcp` or `rtu` (RTU frames over TCP, for serial-to-Ethernet converters).
+    framing: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -641,6 +695,11 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) -> Result<(
                     request_timeout: device.request_timeout_ms.map(Duration::from_millis),
                     base_address: device.base_address,
                     max_batch_size: device.max_batch_size,
+                    framing: device
+                        .framing
+                        .as_deref()
+                        .map(|value| parse_framing(&format!("{name}: framing"), value))
+                        .transpose()?,
                     include_models: device.include_models.map(BTreeSet::from_iter),
                     exclude_models: device.exclude_models.map(BTreeSet::from_iter),
                     model_intervals: parse_model_intervals(&name, device.model_intervals_s)?,
@@ -698,6 +757,9 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) -> Result<(
         );
         if let Some(delay) = modbus.inter_read_delay_ms {
             config.modbus.inter_read_delay_ms = Some(delay);
+        }
+        if let Some(framing) = modbus.framing {
+            config.modbus.framing = parse_framing("modbus.framing", &framing)?;
         }
     }
 

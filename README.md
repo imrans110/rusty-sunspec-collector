@@ -19,6 +19,9 @@ dropped (and counted) instead of growing the buffer without limit.
   mode rescans periodically and starts pollers for new hosts.
 - **Gateway support**: devices are keyed by host and unit ID, so every unit behind one gateway IP
   is polled.
+- **Serial devices through converters**: `framing = "rtu"` speaks Modbus RTU over TCP, so RS-485
+  inverters and meters behind a transparent serial-to-Ethernet converter are polled; units on one
+  converter share a single connection and never overlap on the bus.
 - **Model chain walk**: the collector finds the `SunS` marker (configured base address first, then
   40000, 0 and 50000) and reads model headers one at a time until the end marker. Models are
   rediscovered on every reconnect.
@@ -297,7 +300,7 @@ build files change. See [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) for d
 
 | Project | Kind | SunSpec handling | Transports | Outputs | Writes to devices |
 |---|---|---|---|---|---|
-| **rusty-sunspec-collector** | Edge service (Rust) | Walks the model chain; decodes with the official SunSpec JSON models (scale factors, sentinels, repeating groups) | Modbus TCP | Kafka (Avro records keyed by device), Prometheus metrics | No |
+| **rusty-sunspec-collector** | Edge service (Rust) | Walks the model chain; decodes with the official SunSpec JSON models (scale factors, sentinels, repeating groups) | Modbus TCP, RTU over TCP | Kafka (Avro records keyed by device), Prometheus metrics | No |
 | [mbmd](https://github.com/volkszaehler/mbmd) | Daemon (Go) | Model discovery via gosunspec; maps a fixed set of inverter, meter and MPPT models to its own measurement names | Modbus TCP, RTU, RTU over TCP | MQTT, InfluxDB, REST, WebSocket, web UI | No |
 | [pysunspec2](https://github.com/sunspec/pysunspec2) | Library (Python), from the SunSpec Alliance | All models; scans 0, 40000 and 50000 and walks the chain | Modbus TCP, RTU | None (Python objects) | Yes |
 | [evcc](https://github.com/evcc-io/evcc) | EV charging and home energy manager (Go) | SunSpec device templates via gosunspec | Modbus TCP, RTU | InfluxDB, MQTT, REST | Yes (curtailment, battery control) |
@@ -308,7 +311,8 @@ When to use which:
 
 - **This project** fits fleets of gateways that feed a Kafka-based data platform: decoded,
   device-keyed records, a local buffer that rides out uplink outages, and metrics for operating
-  many edge nodes. It is read-only and Modbus TCP only (see [Limitations](#limitations)).
+  many edge nodes. It is read-only, and reaches serial devices only through a TCP converter (see
+  [Limitations](#limitations)).
 - **mbmd** fits a single site that wants MQTT or InfluxDB and a web UI, and covers serial RS-485
   meters.
 - **pysunspec2** and the **sunspec** crate are libraries for writing your own tool, including
@@ -326,6 +330,8 @@ When to use which:
 - Point metadata (units, labels) is not in the payload; consumers look it up by model and point
   name in the bundled definitions.
 - No configuration reload (SIGHUP).
+- Serial (RS-485) devices are reached through a serial-to-Ethernet converter (`framing = "rtu"`);
+  native serial ports on the gateway are not supported yet.
 - Enum and bitfield points are published as integers, not expanded to names.
 - Delivery is at-least-once, so duplicates are possible after a crash.
 

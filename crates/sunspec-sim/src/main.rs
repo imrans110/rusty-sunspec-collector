@@ -7,7 +7,8 @@ use types::DeviceDump;
 
 const USAGE: &str =
     "usage: sunspec-sim [--bind ADDR:PORT] [--units 1,2] [--models 1,103,160:48] [--base 40000]
-       sunspec-sim [--bind ADDR:PORT] --fixture DUMP.json   (replay a collector-app --probe dump)";
+       sunspec-sim [--bind ADDR:PORT] --fixture DUMP.json   (replay a collector-app --probe dump)
+       add --rtu to speak RTU frames over TCP, like a serial-to-Ethernet converter";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -26,14 +27,23 @@ async fn main() -> ExitCode {
         }
     };
 
-    let handle = match sunspec_sim::start(config.sim, config.bind).await {
+    let started = if config.rtu {
+        sunspec_sim::start_rtu_over_tcp(config.sim, config.bind).await
+    } else {
+        sunspec_sim::start(config.sim, config.bind).await
+    };
+    let handle = match started {
         Ok(handle) => handle,
         Err(err) => {
             eprintln!("failed to start simulator on {}: {err}", config.bind);
             return ExitCode::FAILURE;
         }
     };
-    println!("sunspec-sim listening on {}", handle.local_addr());
+    println!(
+        "sunspec-sim listening on {}{}",
+        handle.local_addr(),
+        if config.rtu { " (RTU over TCP)" } else { "" }
+    );
     match &config.fixture {
         Some(dump) => {
             handle.load_dump(dump.unit_id, dump);
@@ -63,6 +73,8 @@ struct Args {
     unit_ids: Vec<u8>,
     /// A probe dump to replay instead of the demo.
     fixture: Option<DeviceDump>,
+    /// RTU frames over TCP instead of Modbus TCP.
+    rtu: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -71,6 +83,7 @@ fn parse_args() -> Result<Args, String> {
     let mut models = parse_models("1,103,120,160:48")?;
     let mut base = 40_000u16;
     let mut fixture = None;
+    let mut rtu = false;
     let mut chain_set = false;
 
     let mut args = env::args().skip(1);
@@ -94,6 +107,7 @@ fn parse_args() -> Result<Args, String> {
                 models = parse_models(&value()?)?;
                 chain_set = true;
             }
+            "--rtu" => rtu = true,
             "--fixture" => fixture = Some(read_dump(std::path::Path::new(&value()?))?),
             "--base" => {
                 base = value()?
@@ -119,6 +133,7 @@ fn parse_args() -> Result<Args, String> {
             sim: SimConfig::single(unit),
             unit_ids: vec![dump.unit_id],
             fixture: Some(dump),
+            rtu,
         });
     }
 
@@ -139,6 +154,7 @@ fn parse_args() -> Result<Args, String> {
         },
         unit_ids,
         fixture: None,
+        rtu,
     })
 }
 

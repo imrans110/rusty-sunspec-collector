@@ -204,6 +204,8 @@ impl UnitMap {
 struct Inner {
     addr: SocketAddr,
     unmapped: Unmapped,
+    /// RTU frames over TCP (a serial converter) instead of Modbus TCP.
+    rtu: bool,
     units: Mutex<HashMap<u8, UnitMap>>,
     stalled: AtomicBool,
     connections: AtomicU64,
@@ -224,6 +226,19 @@ pub struct SimHandle {
 
 /// Starts a simulator listening on `bind` (use port 0 for an ephemeral port).
 pub async fn start(config: SimConfig, bind: SocketAddr) -> io::Result<SimHandle> {
+    start_framed(config, bind, false).await
+}
+
+/// Starts a simulator that speaks Modbus RTU frames over TCP, like a transparent
+/// serial-to-Ethernet converter in front of an RS-485 bus: unit ID, PDU and CRC, no
+/// MBAP header. Units that do not exist stay silent (the client times out), and
+/// frames with a bad CRC are ignored, as on a real bus. Only read holding registers
+/// (0x03) requests are understood.
+pub async fn start_rtu_over_tcp(config: SimConfig, bind: SocketAddr) -> io::Result<SimHandle> {
+    start_framed(config, bind, true).await
+}
+
+async fn start_framed(config: SimConfig, bind: SocketAddr, rtu: bool) -> io::Result<SimHandle> {
     let listener = TcpListener::bind(bind).await?;
     let addr = listener.local_addr()?;
     let units = config
@@ -237,6 +252,7 @@ pub async fn start(config: SimConfig, bind: SocketAddr) -> io::Result<SimHandle>
         inner: Arc::new(Inner {
             addr,
             unmapped: config.unmapped,
+            rtu,
             units: Mutex::new(units),
             stalled: AtomicBool::new(false),
             connections: AtomicU64::new(0),
@@ -364,6 +380,14 @@ impl SimHandle {
         reads.get(&(unit_id, addr)).copied().unwrap_or(0)
     }
 
+    fn has_unit(&self, unit_id: u8) -> bool {
+        self.inner
+            .units
+            .lock()
+            .expect("sim state poisoned")
+            .contains_key(&unit_id)
+    }
+
     fn read(&self, unit_id: u8, start: u16, count: u16) -> Result<Vec<u16>, u8> {
         let units = self.inner.units.lock().expect("sim state poisoned");
         let unit = units.get(&unit_id).ok_or(EX_GATEWAY_TARGET_FAILED)?;
@@ -417,7 +441,70 @@ async fn run_listener(
     }
 }
 
-async fn serve_connection(handle: SimHandle, mut stream: TcpStream) {
+async fn serve_connection(handle: SimHandle, stream: TcpStream) {
+    if handle.inner.rtu {
+        serve_rtu_connection(handle, stream).await;
+    } else {
+        serve_tcp_connection(handle, stream).await;
+    }
+}
+
+async fn serve_rtu_connection(handle: SimHandle, mut stream: TcpStream) {
+    let mut drop_rx = handle.inner.drop_tx.subscribe();
+    loop {
+        tokio::select! {
+            frame = read_rtu_request(&mut stream) => {
+                let Ok(frame) = frame else { return };
+                if handle.inner.stalled.load(Ordering::SeqCst) {
+                    continue;
+                }
+                // A corrupted frame, a broadcast or an absent unit gets no answer.
+                let Some((unit_id, pdu)) = frame else { continue };
+                if unit_id == 0 || !handle.has_unit(unit_id) {
+                    continue;
+                }
+                handle.inner.requests.fetch_add(1, Ordering::SeqCst);
+                let response = respond(&handle, unit_id, &pdu);
+                let mut frame = Vec::with_capacity(response.len() + 3);
+                frame.push(unit_id);
+                frame.extend_from_slice(&response);
+                let crc = crc16(&frame);
+                frame.extend_from_slice(&crc.to_le_bytes());
+                if stream.write_all(&frame).await.is_err() {
+                    return;
+                }
+            }
+            _ = drop_rx.changed() => return,
+        }
+    }
+}
+
+/// A read holding registers request in RTU framing is 8 bytes: unit ID, function,
+/// start, count and CRC. Returns `None` when the CRC does not match.
+async fn read_rtu_request(stream: &mut TcpStream) -> io::Result<Option<(u8, Vec<u8>)>> {
+    let mut frame = [0u8; 8];
+    stream.read_exact(&mut frame).await?;
+    let crc = u16::from_le_bytes([frame[6], frame[7]]);
+    if crc16(&frame[..6]) != crc {
+        return Ok(None);
+    }
+    Ok(Some((frame[0], frame[1..6].to_vec())))
+}
+
+/// CRC-16/MODBUS (polynomial 0xA001, initial 0xFFFF); sent low byte first.
+fn crc16(data: &[u8]) -> u16 {
+    data.iter().fold(0xFFFF, |crc, byte| {
+        (0..8).fold(crc ^ u16::from(*byte), |crc, _| {
+            if crc & 1 == 1 {
+                (crc >> 1) ^ 0xA001
+            } else {
+                crc >> 1
+            }
+        })
+    })
+}
+
+async fn serve_tcp_connection(handle: SimHandle, mut stream: TcpStream) {
     let mut drop_rx = handle.inner.drop_tx.subscribe();
     loop {
         tokio::select! {
@@ -557,6 +644,15 @@ pub fn run_demo(handle: SimHandle, unit_ids: Vec<u8>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crc16_matches_the_modbus_reference() {
+        // Read 1 register at 0 from unit 1: 01 03 00 00 00 01 84 0A.
+        assert_eq!(
+            crc16(&[0x01, 0x03, 0x00, 0x00, 0x00, 0x01]).to_le_bytes(),
+            [0x84, 0x0A]
+        );
+    }
 
     #[test]
     fn bare_model_ids_use_the_bundled_definition_length() {
