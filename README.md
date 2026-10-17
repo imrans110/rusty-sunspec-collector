@@ -49,6 +49,9 @@ dropped (and counted) instead of growing the buffer without limit.
   and invalid values stop the collector at startup instead of falling back to defaults.
 - **Simulator included**: `sunspec-sim` serves SunSpec register maps over Modbus TCP, so the test
   suite and the Docker stack run without hardware.
+- **Device probe and replay**: `collector-app --probe host:unit` dumps a device's SunSpec map as
+  JSON (serial numbers blanked), `sunspec-sim --fixture` serves a dump again, and CI replays every
+  dump in `fixtures/devices/`, so a device that has been reported stays tested.
 
 ## Install
 
@@ -129,7 +132,7 @@ To publish to the Compose Kafka broker, add `SUNSPEC_KAFKA_BROKERS=localhost:290
 
 Simulator flags: `--bind ADDR:PORT` (default `0.0.0.0:1502`), `--units 1,2` (default `1`),
 `--models 1,103,120,160:48` (the default; a bare ID uses the bundled definition's length, `id:len`
-sets it), `--base 40000`. It serves holding registers (function 0x03), rejects reads of more than
+sets it), `--base 40000`, or `--fixture dump.json` to replay a `collector-app --probe` dump. It serves holding registers (function 0x03), rejects reads of more than
 125 registers, and changes power, current, voltage, frequency, energy and state values in model 103
 over time.
 
@@ -338,7 +341,8 @@ listed under [Limitations](#limitations); changes are recorded in [CHANGELOG.md]
 Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the checks to
 run before opening a PR, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). If you run the collector
 against real hardware, a [device report](https://github.com/imrans110/rusty-sunspec-collector/issues/new?template=device_report.yml)
-(working or not) helps build the list of tested devices. Report security issues privately as
+with the output of `collector-app --probe host:unit` (working or not) helps build the list of
+tested devices. Report security issues privately as
 described in [SECURITY.md](SECURITY.md). Keep the `types` crate light (serde only) and avoid adding heavy
 dependencies to shared crates.
 

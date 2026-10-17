@@ -107,6 +107,7 @@ rusty-sunspec-collector/
     Dockerfile.cross      Cross-compilation image for the release targets
     prometheus.yml        Scrape config for the compose stack
   scripts/                Release packaging, install.sh, CHANGELOG section extraction
+  fixtures/devices/       collector-app --probe dumps replayed by the fixture test
   docs/                   This documentation (mdBook), example config, systemd unit
 ```
 
@@ -202,6 +203,7 @@ stack and local development.
 
 ```sh
 cargo run -p sunspec-sim -- [--bind ADDR:PORT] [--units 1,2] [--models 1,103,160:48] [--base 40000]
+cargo run -p sunspec-sim -- [--bind ADDR:PORT] --fixture fixtures/devices/<device>.json
 ```
 
 | Flag | Default | Meaning |
@@ -210,6 +212,7 @@ cargo run -p sunspec-sim -- [--bind ADDR:PORT] [--units 1,2] [--models 1,103,160
 | `--units LIST` | `1` | Unit IDs to serve, each with the same model chain |
 | `--models LIST` | `1,103,120,160:48` | Model chain. A bare ID uses the body length of the bundled definition; `id:len` sets the body length explicitly, which models with repeating groups need (`160:48` is model 160 with two MPPT modules). |
 | `--base ADDR` | `40000` | Base address of the `SunS` marker |
+| `--fixture FILE` | none | Replay a `collector-app --probe` dump: its unit ID, base address, model chain and registers. Cannot be combined with `--units`, `--models` or `--base`; the demo does not run. |
 
 Invalid arguments print the usage and exit with code 2. The binary also runs a live demo for every
 unit: it writes nameplate strings into model 1 (`Mn`, `Md`, `SN`, `DA`), sets the scale factors of
@@ -230,6 +233,8 @@ dev-dependency (`sunspec-sim = { path = "../sunspec-sim" }`).
 | `ModelSpec { id, len }` | One model; `len` excludes the 2 header registers |
 | `parse_models("1,103,160:48")`, `default_body_len(id)` | Build chains the way the binary does |
 | `Unmapped::Exception` / `Unmapped::Zeros` | Exception 0x02 or zeros outside the map |
+| `read_dump(path)`, `UnitSpec::from_dump(&dump)`, `handle.load_dump(unit_id, &dump)` | Replay a `collector-app --probe` dump (`types::DeviceDump`); `from_dump` rejects a chain whose model addresses do not line up |
+| `handle.reads_at(unit_id, addr)` | Read requests that started at an address (includes discovery's header read), for polling-schedule tests |
 | `run_demo(handle, unit_ids)` | The binary's live demo |
 
 `SimHandle` methods (cloning a handle shares the same simulator):
@@ -290,7 +295,7 @@ publisher. Tests use short real intervals (100 ms polls), so they take seconds o
 
 | File | Covers |
 |------|--------|
-| `crates/sunspec-parser/tests/decode_tests.rs` | Every bundled definition loads (`supported_models()` list); model names; scaling (model 103); "not implemented" values become null; header, scale factors and padding are omitted; model 1 strings; model 160 repeating modules using top-level scale factors; float models and NaN; truncated registers |
+| `crates/sunspec-parser/tests/decode_tests.rs` | Every file in `models/` is bundled; every model decodes a zeroed map with each top-level point once and unique point names, and short or long maps never panic; float meters 211–214; model names; scaling (model 103); "not implemented" values become null; header, scale factors and padding are omitted; model 1 strings; model 160 repeating modules using top-level scale factors; float models and NaN; truncated registers |
 | `crates/modbus-client/tests/sim_tests.rs` | Reads over 125 registers are split; an oversized `max_batch_size` passed to the client library is clamped to 125; an exception keeps the connection; reconnect after a dropped connection; a timeout drops the connection and recovers; offline device fails to connect, then recovers; hostnames are resolved |
 | `crates/poller-actor/tests/device_tests.rs` | Discovery of a 290-register, 7-model chain; map found at another standard base; device without a SunSpec map; device offline at startup is polled once it appears; a stalled session is restarted |
 | `crates/buffer/tests/buffer_tests.rs` | Enqueue, dequeue and delete; deleting nothing is a no-op; batch enqueue keeps order; trimming keeps the newest rows; age-based retention |
@@ -299,6 +304,9 @@ publisher. Tests use short real intervals (100 ms polls), so they take seconds o
 | `crates/avro-kafka/tests/kafka_integration_tests.rs` | Ignored by default; see below |
 | `crates/collector-app/tests/app_tests.rs` | The whole collector against the simulator: every unit behind a gateway is polled; every model of a long chain is polled; subnet mode keeps running and finds a device on rescan; a 5,000-row backlog drains within 2 s; published records are decoded and keyed by device; a metrics port that is already taken fails startup (`a_taken_metrics_port_fails_startup`) |
 | `crates/collector-app/tests/config_validation_tests.rs` | TOML and JSON fixtures (`tests/fixtures/`); invalid values fail validation; unknown keys are rejected; unparsable environment values name the variable; static device parsing (unit range, hostnames, default unit); Kafka compression and acks values; `acks` below `all` only with idempotence off (`acks_below_all_require_idempotence_off`); `modbus.max_batch_size` at most 125 (`modbus_batch_size_is_limited_to_the_protocol_maximum`); `[metrics]` and `[runtime]` sections; the shipped `docs/config.example.toml` and `docs/sunspec-collector.env` load and validate (`shipped_example_config_file_is_valid`, `shipped_example_env_file_is_valid`; the env file is read the way systemd and Docker read it, without trailing comments); Kafka security: SASL requires mechanism, username and password, `ssl_*`/`sasl_*` settings must match the protocol, certificate files must exist, passwords load from `*_password_file` and never appear in debug output |
+| `crates/collector-app/tests/polling_profile_tests.rs` | Polling profiles from TOML, JSON and environment variables; per-device merge rules; `SUNSPEC_STATIC_DEVICES` dropping file overrides; every validation error; every TOML and JSON example in the Polling profiles and Complete examples sections of `docs/configuration.md`; an end-to-end run where the simulator's read counts show slow models are read less often |
+| `crates/collector-app/tests/cli_tests.rs` | `--version`, `--help`, `--print-schema`; `--probe` against the simulator prints only JSON on stdout with the serial number blanked; a bad `--probe` target fails |
+| `crates/collector-app/tests/fixture_replay_tests.rs` | Every dump in `fixtures/devices/` is served by the simulator, probed again, and must give the same model chain, registers and decoded points; a dump with a broken chain is rejected |
 | `crates/collector-app/tests/metrics_tests.rs` | `/healthz` and `/metrics` of a collector polling unit 1 and a unit 7 that does not exist: `devices_up` 1 of `devices_total` 2, HELP text, per-device series, `sunspec_device_up` 1 for unit 1 and 0 for the unreachable unit 7, histogram buckets, no `batch_size` label. It installs the global metrics recorder, so it is its own test binary. |
 | `crates/collector-app/tests/signal_tests.rs` | Unix only: spawns the built `collector-app` binary, sends SIGTERM and expects a graceful stop with exit code 0 |
 

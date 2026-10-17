@@ -4,6 +4,7 @@ mod devices;
 pub mod health;
 mod ingest;
 pub mod metrics_server;
+pub mod probe;
 mod retention;
 mod systemd;
 mod uplink;

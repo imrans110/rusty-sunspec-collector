@@ -77,6 +77,11 @@ the owner's approval).
   discover → poll. On failure or stall, back off `respawn_delay_ms` × 2^(n−1), capped at 60 s, plus
   up to 10 % device-salted jitter; reset after a session that polled. Exits only on shutdown.
   Devices are keyed by host and unit ID.
+- **Probe and fixtures**: `collector-app --probe host[:unit]` (`collector_app::probe::probe`)
+  writes a `types::DeviceDump` (format 1: registers as hex words, points in definition order,
+  top-level `SN`/MAC/IP blanked unless `--keep-identifiers`); `sunspec-sim --fixture` and
+  `UnitSpec::from_dump` + `SimHandle::load_dump` replay it; `fixture_replay_tests.rs` replays
+  every `fixtures/devices/*.json`.
 - **Polling profiles**: `poller_actor::ModelSchedule` (include, exclude, per-model intervals) on
   `ActorConfig.models`, from `poller.include_models` / `exclude_models` / `model_intervals_s`
   (env `SUNSPEC_INCLUDE_MODELS` etc.). Static device entries override poll interval, request

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `collector-app --probe HOST[:UNIT]` reads one device's SunSpec map once and prints it as JSON (base address, model chain, registers, decoded points), using the service's configuration. Serial numbers and network addresses are blanked unless `--keep-identifiers` is given
+- `sunspec-sim --fixture dump.json` replays a probe dump; the library gains `read_dump`, `UnitSpec::from_dump` and `SimHandle::load_dump`, and `types` gains `DeviceDump`
+- `fixtures/devices/`: probe dumps that CI replays through discovery and decoding (`fixture_replay_tests.rs`); starts with a synthetic dump of the simulator's demo inverter
+- The device report form asks for a probe dump
+
 ## [0.3.0] - 2026-10-17
 
 ### Upgrade notes

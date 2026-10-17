@@ -14,6 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tracing::{debug, info};
+use types::DeviceDump;
 
 /// Protocol limit for a single read holding registers (0x03) request.
 pub const MAX_REGISTERS_PER_READ: u16 = 125;
@@ -70,6 +71,57 @@ impl UnitSpec {
             models,
         }
     }
+}
+
+impl UnitSpec {
+    /// The unit a probe dump (`collector-app --probe`) describes: its unit ID, base
+    /// address and model chain. Load the captured registers with
+    /// [`SimHandle::load_dump`] once the simulator is started.
+    pub fn from_dump(dump: &DeviceDump) -> Result<Self, String> {
+        let mut addr = dump
+            .base_address
+            .checked_add(2)
+            .ok_or("base address overflows")?;
+        let mut models = Vec::with_capacity(dump.models.len());
+        for model in &dump.models {
+            if model.start != addr {
+                return Err(format!(
+                    "model {} starts at {}, but the chain before it ends at {addr}",
+                    model.id, model.start
+                ));
+            }
+            if model.length < 2 {
+                return Err(format!("model {} has length {}", model.id, model.length));
+            }
+            if !model.registers.is_empty() && model.registers.len() != usize::from(model.length) {
+                return Err(format!(
+                    "model {} has {} registers but length {}",
+                    model.id,
+                    model.registers.len(),
+                    model.length
+                ));
+            }
+            models.push(ModelSpec {
+                id: model.id,
+                len: model.length - 2,
+            });
+            addr = addr
+                .checked_add(model.length)
+                .ok_or("model chain overflows the address space")?;
+        }
+        Ok(Self {
+            unit_id: dump.unit_id,
+            base: dump.base_address,
+            models,
+        })
+    }
+}
+
+/// Reads a probe dump from a JSON file.
+pub fn read_dump(path: &std::path::Path) -> Result<DeviceDump, String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
+    serde_json::from_str(&text).map_err(|err| format!("parse {}: {err}", path.display()))
 }
 
 #[derive(Debug, Clone)]
@@ -241,6 +293,18 @@ impl SimHandle {
         };
         self.set_registers(unit_id, start.wrapping_add(offset), values);
         true
+    }
+
+    /// Loads the registers captured in `dump` into `unit_id` (a unit built with
+    /// [`UnitSpec::from_dump`]). Models whose read failed during the probe keep zeros.
+    pub fn load_dump(&self, unit_id: u8, dump: &DeviceDump) {
+        for model in dump
+            .models
+            .iter()
+            .filter(|model| !model.registers.is_empty())
+        {
+            self.set_registers(unit_id, model.start, &model.registers);
+        }
     }
 
     /// Writes a string point, NUL-padded to its size.

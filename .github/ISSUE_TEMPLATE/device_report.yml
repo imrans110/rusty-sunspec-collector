@@ -36,10 +36,16 @@ body:
     validations:
       required: true
   - type: textarea
+    id: probe
+    attributes:
+      label: Probe dump
+      description: |
+        The most useful part of a report. Run `collector-app --probe <host>:<unit> > dump.json` (port, timeout and base address come from your usual config or SUNSPEC_* variables). Serial numbers and network addresses are blanked; check the file, then attach it here (rename it to `dump.txt` or zip it, since GitHub does not accept `.json` attachments).
+  - type: textarea
     id: models
     attributes:
       label: Discovered models
-      description: The `discovered SunSpec models` log line for this device.
+      description: If you cannot attach a dump, the `discovered SunSpec models` log line for this device.
       render: text
   - type: textarea
     id: notes
