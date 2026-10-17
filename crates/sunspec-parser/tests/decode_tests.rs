@@ -188,6 +188,37 @@ fn not_implemented_values_are_null() {
     );
 }
 
+/// Found by the decode_model fuzz target: `WH_SF = 23901` made `WH` infinite.
+#[test]
+fn values_that_are_not_finite_are_null() {
+    let mut registers = model_registers(103, 50);
+    set(&mut registers, 103, "WH", &[0x0001, 0x0005]);
+    set(&mut registers, 103, "WH_SF", &[23_901]);
+    set(&mut registers, 103, "W", &[4321]);
+    set(&mut registers, 103, "W_SF", &[(-400i16) as u16]);
+    set(&mut registers, 103, "A", &[1234]);
+    set(&mut registers, 103, "A_SF", &[(-30_000i16) as u16]);
+
+    let inverter = points(103, &registers);
+
+    assert_eq!(inverter["WH"], PointValue::Null, "scaled past f64::MAX");
+    for name in ["W", "A"] {
+        let PointValue::Float(value) = inverter[name] else {
+            panic!("{name} is a float: {:?}", inverter[name]);
+        };
+        assert!(value.is_finite(), "{name} = {value}");
+    }
+
+    let fixed = model_definition(211).unwrap().group.fixed_size();
+    let mut meter = model_registers(211, fixed as u16 - 2);
+    set(&mut meter, 211, "A", &float(f32::INFINITY));
+    assert_eq!(
+        points(211, &meter)["A"],
+        PointValue::Null,
+        "infinite float32"
+    );
+}
+
 #[test]
 fn header_scale_factors_and_padding_are_omitted() {
     let names: Vec<String> = decode_model(103, &model_registers(103, 50))

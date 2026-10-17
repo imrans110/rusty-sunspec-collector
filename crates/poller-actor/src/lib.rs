@@ -2,6 +2,7 @@
 //! schedule, and recover from failures (including stalls) until shutdown.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -218,15 +219,38 @@ impl DeviceHealth {
     }
 }
 
+/// Where [`discover_models`] reads registers from: the Modbus client, or an in-memory
+/// register map in tests and fuzzing.
+pub trait ReadRegisters {
+    /// Reads `count` holding registers starting at `start`.
+    fn read_registers(
+        &self,
+        unit_id: u8,
+        start: u16,
+        count: u16,
+    ) -> impl Future<Output = Result<Vec<u16>, ClientError>> + Send;
+}
+
+impl ReadRegisters for ModbusClient {
+    fn read_registers(
+        &self,
+        unit_id: u8,
+        start: u16,
+        count: u16,
+    ) -> impl Future<Output = Result<Vec<u16>, ClientError>> + Send {
+        self.read_range(unit_id, start, count)
+    }
+}
+
 /// Finds the SunSpec model chain by reading one model header at a time. Reads stay
 /// small and never run past the end of the map, unlike a fixed-size window.
-pub async fn discover_models(
-    client: &ModbusClient,
+pub async fn discover_models<R: ReadRegisters>(
+    client: &R,
     unit_id: u8,
     bases: &[u16],
 ) -> Result<(u16, Vec<ModelDefinition>), PollerError> {
     for &base in bases {
-        match client.read_range(unit_id, base, 2).await {
+        match client.read_registers(unit_id, base, 2).await {
             Ok(marker) if marker == SUNSPEC_ID => {
                 return walk_chain(client, unit_id, base)
                     .await
@@ -239,8 +263,8 @@ pub async fn discover_models(
     Err(PollerError::NoSunSpecMap(bases.to_vec()))
 }
 
-async fn walk_chain(
-    client: &ModbusClient,
+async fn walk_chain<R: ReadRegisters>(
+    client: &R,
     unit_id: u8,
     base: u16,
 ) -> Result<Vec<ModelDefinition>, PollerError> {
@@ -249,8 +273,10 @@ async fn walk_chain(
         .checked_add(2)
         .ok_or(PollerError::MalformedChain("address overflow"))?;
     loop {
-        let header = client.read_range(unit_id, addr, 2).await?;
-        let (id, len) = (header[0], header[1]);
+        let header = client.read_registers(unit_id, addr, 2).await?;
+        let [id, len] = header[..] else {
+            return Err(PollerError::MalformedChain("short model header"));
+        };
         if id == SUNSPEC_END_ID {
             return Ok(models);
         }
@@ -401,7 +427,7 @@ async fn poll_device(
         },
     };
     let bases = base_candidates(config.base_address);
-    let (base, models) = match discover_models(&client, identity.unit_id, &bases).await {
+    let (base, models) = match discover_models(client.as_ref(), identity.unit_id, &bases).await {
         Ok(found) => found,
         Err(err) => {
             if let PollerError::Modbus(ref modbus_err) = err {

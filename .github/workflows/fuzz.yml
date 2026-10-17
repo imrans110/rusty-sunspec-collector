@@ -1,0 +1,56 @@
+name: Fuzzing
+
+# ClusterFuzzLite builds the cargo-fuzz targets in fuzz/ with AddressSanitizer and runs them:
+# for five minutes on pull requests that change code, and for half an hour every week, keeping
+# the corpus between runs as workflow artifacts. A crash fails the run and is uploaded as an
+# artifact with a reproducer. See the Fuzzing section of docs/DEVELOPER_GUIDE.md.
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "fuzz/**"
+      - "fixtures/**"
+      - ".clusterfuzzlite/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "docs/config.example.toml"
+      - ".github/workflows/fuzz.yml"
+  schedule:
+    - cron: "41 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      # Reads the corpus and coverage that earlier runs kept as artifacts.
+      actions: read
+    env:
+      MODE: ${{ github.event_name == 'pull_request' && 'code-change' || 'batch' }}
+      SECONDS_TOTAL: ${{ github.event_name == 'pull_request' && 300 || 1800 }}
+    steps:
+      - name: Build the fuzzers
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: rust
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          sanitizer: address
+
+      - name: Run the fuzzers
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: rust
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          sanitizer: address
+          mode: ${{ env.MODE }}
+          fuzz-seconds: ${{ env.SECONDS_TOTAL }}

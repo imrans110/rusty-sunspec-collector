@@ -109,6 +109,14 @@ impl CollectorConfig {
         Ok(config)
     }
 
+    /// Defaults, then a config file's contents, without environment overrides or
+    /// validation: the file step of [`CollectorConfig::load_with_path`].
+    pub fn from_file_contents(content: &str, format: ConfigFormat) -> Result<Self> {
+        let mut config = Self::default();
+        apply_file_config(&mut config, parse_file_config(content, format)?)?;
+        Ok(config)
+    }
+
     /// The settings one device runs with: the global ones, then its overrides.
     pub fn device_config(&self, identity: DeviceIdentity) -> DeviceConfig {
         let mut actor = self.poller.clone();
@@ -646,15 +654,27 @@ fn load_file_config(config_path: Option<&str>) -> Result<Option<FileConfig>> {
     let ext = Path::new(&path)
         .extension()
         .and_then(|value| value.to_str());
-
-    let config = match ext {
-        Some("json") => {
-            serde_json::from_str(&content).with_context(|| format!("parse json config {path}"))?
-        }
-        _ => toml::from_str(&content).with_context(|| format!("parse toml config {path}"))?,
+    let (format, name) = match ext {
+        Some("json") => (ConfigFormat::Json, "json"),
+        _ => (ConfigFormat::Toml, "toml"),
     };
+    parse_file_config(&content, format)
+        .with_context(|| format!("parse {name} config {path}"))
+        .map(Some)
+}
 
-    Ok(Some(config))
+/// How a config file is written: `.json` files are JSON, anything else TOML.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigFormat {
+    Toml,
+    Json,
+}
+
+fn parse_file_config(content: &str, format: ConfigFormat) -> Result<FileConfig> {
+    Ok(match format {
+        ConfigFormat::Json => serde_json::from_str(content)?,
+        ConfigFormat::Toml => toml::from_str(content)?,
+    })
 }
 
 fn set<T>(target: &mut T, value: Option<T>) {

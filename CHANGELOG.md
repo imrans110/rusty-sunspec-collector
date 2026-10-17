@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - The help text of `sunspec_poll_duration_seconds` now says it times the models due in one poll cycle (it has done so since polling profiles)
 
+### Fixed
+- A scale factor far outside SunSpec's -10 to 10 no longer produces infinite or NaN values (for example `WH_SF = 23901` made `WH` infinite); points whose value is not a finite number, including infinite float readings, are now null. Found by fuzzing
+
 ### Security
 - The Docker images and release binaries are built from base images pinned by digest (`rust`, `debian` and the cross-rs images), and every GitHub Actions step is pinned to a commit SHA, so a re-pushed tag upstream cannot change what a release is built with. OpenSSF Scorecard runs weekly; its badge is in the README
 

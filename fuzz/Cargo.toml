@@ -1,0 +1,47 @@
+[package]
+name = "sunspec-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "cargo-fuzz targets for the decoder, model-chain discovery and config parsing"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+collector-app = { path = "../crates/collector-app" }
+modbus-client = { path = "../crates/modbus-client" }
+poller-actor = { path = "../crates/poller-actor" }
+sunspec-parser = { path = "../crates/sunspec-parser" }
+types = { path = "../crates/types" }
+
+# Not a member of the main workspace: fuzzing needs nightly Rust and sanitizers.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "decode_model"
+path = "fuzz_targets/decode_model.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "model_chain"
+path = "fuzz_targets/model_chain.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config"
+path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false

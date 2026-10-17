@@ -1,7 +1,9 @@
 version: 2
 updates:
   - package-ecosystem: cargo
-    directory: /
+    directories:
+      - /
+      - /fuzz
     schedule:
       interval: weekly
     commit-message:
@@ -20,10 +22,13 @@ updates:
       - ci
     open-pull-requests-limit: 3
 
-  # Base images in the Dockerfiles, pinned by digest: digest updates for the same tag. The
-  # builder stays on the MSRV (rust:1.88), so Rust version bumps are left to a deliberate change.
+  # Base images in the Dockerfiles (and the ClusterFuzzLite image), pinned by digest: digest
+  # updates for the same tag. The builder stays on the MSRV (rust:1.88), so Rust version bumps
+  # are left to a deliberate change.
   - package-ecosystem: docker
-    directory: /
+    directories:
+      - /
+      - /.clusterfuzzlite
     schedule:
       interval: weekly
     commit-message:

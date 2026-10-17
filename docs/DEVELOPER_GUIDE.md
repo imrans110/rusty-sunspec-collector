@@ -70,6 +70,8 @@ rusty-sunspec-collector/
     workflows/release.yml     Release archives and images (dry run unless a v* tag)
     workflows/deploy-docs.yml mdBook -> GitHub Pages
     workflows/scorecard.yml   OpenSSF Scorecard (README badge, Security tab)
+    workflows/codeql.yml      CodeQL static analysis of the Rust code and the workflows
+    workflows/fuzz.yml        ClusterFuzzLite: runs the fuzz targets
     dependabot.yml            Weekly Cargo, GitHub Actions and Docker image updates
     ISSUE_TEMPLATE/           Issue forms: bug report, feature request, device report
     pull_request_template.md  PR checklist
@@ -104,6 +106,8 @@ rusty-sunspec-collector/
       src/systemd.rs      READY and watchdog notifications (Linux)
       tests/              End-to-end, CLI, config, metrics and signal tests
     sunspec-sim/          SunSpec Modbus TCP simulator (library + binary)
+  fuzz/                   cargo-fuzz targets (own workspace, nightly); seeds.py writes seed corpora
+  .clusterfuzzlite/       Build image and script for running the fuzz targets in CI
   docker/
     Dockerfile.cross      Cross-compilation image for the release targets
     prometheus.yml        Scrape config for the compose stack
@@ -400,6 +404,10 @@ release archives and images, and publishes them on a `v*` tag (see
 GitHub Pages on pushes to `main` that touch `docs/` or `README.md` (mdBook 0.4.40), and
 `scorecard.yml` runs [OpenSSF Scorecard](https://scorecard.dev/) weekly and on pushes to `main`,
 publishing the score behind the README badge and the findings to the repository's Security tab.
+`codeql.yml` runs CodeQL on the Rust code and on the workflows (pull requests that change code or
+workflows, every push to `main`, weekly), and `fuzz.yml` runs the fuzz targets (see
+[Fuzzing](#fuzzing)). Neither is required for merging; CodeQL's check on a pull request lists the
+alerts it adds, and the Security tab has all of them.
 
 Workflow hygiene, which Scorecard checks:
 
@@ -427,6 +435,47 @@ cargo audit
 Changing `RUSTFLAGS` rebuilds every dependency, librdkafka included. Setting
 `CARGO_TARGET_DIR=target/ci` for the last two commands keeps that build separate from your normal
 one.
+
+---
+
+## Fuzzing
+
+`fuzz/` holds [cargo-fuzz](https://rust-fuzz.github.io/book/cargo-fuzz.html) targets for the
+code that reads input the collector does not control:
+
+| Target | Input | Checks |
+|--------|-------|--------|
+| `decode_model` | A bundled model ID and arbitrary registers | `decode_model_labeled` does not panic, agrees with `decode_model`, names each point once, labels only existing points, and returns only finite floats |
+| `model_chain` | An arbitrary register map at the configured or a standard base | `discover_models` ends with a chain or an error; an accepted chain starts with `SunS`, has at most 256 contiguous models and ends with `0xFFFF`; each model it finds decodes without panicking |
+| `config` | An arbitrary config file, loaded as TOML and as JSON | `CollectorConfig::from_file_contents`, `validate()` and `device_config()` return errors instead of panicking |
+
+`discover_models` reads through the `ReadRegisters` trait, which the target implements with an
+in-memory register map, so the chain walk runs without a network. The config target skips inputs
+that could name a `*_file` setting, since loading reads those files.
+
+`fuzz/` is its own workspace (it needs nightly Rust and sanitizers), so the workspace commands
+above do not build it. To run a target locally:
+
+```sh
+rustup toolchain install nightly
+cargo install cargo-fuzz --locked
+fuzz/seeds.py fuzz/seeds                     # seed corpora from fixtures/ and the example config
+cargo +nightly fuzz run -O decode_model fuzz/corpus/decode_model fuzz/seeds/decode_model \
+  -- -max_total_time=300
+```
+
+A crash is saved under `fuzz/artifacts/<target>/`; `cargo +nightly fuzz run -O <target> <file>`
+replays it and `cargo +nightly fuzz tmin -O <target> <file>` shrinks it. Turn a fixed crash into
+a regression test in the crate's tests (see `values_that_are_not_finite_are_null` in
+`crates/sunspec-parser/tests/decode_tests.rs`, found by `decode_model`).
+
+In CI, `.github/workflows/fuzz.yml` uses [ClusterFuzzLite](https://google.github.io/clusterfuzzlite/):
+it builds the targets in the OSS-Fuzz Rust image (`.clusterfuzzlite/`) with AddressSanitizer and
+seed corpora from `fuzz/seeds.py`, fuzzes for five minutes on pull requests that change code, and
+for half an hour every Sunday, keeping the corpus between runs as workflow artifacts. A crash fails
+the run and is uploaded with its input. When you add a target, add a `[[bin]]` to
+`fuzz/Cargo.toml`, add it to `targets` in `.clusterfuzzlite/build.sh`, and give it seeds in
+`fuzz/seeds.py` if the fixtures have useful input.
 
 ---
 
@@ -519,8 +568,9 @@ the change in the CHANGELOG.
 - All crates share one version, `version` under `[workspace.package]` in `Cargo.toml`. Releases are
   published by `.github/workflows/release.yml` when a `v*` tag is pushed; the steps are in
   [Cutting a release](build.md#cutting-a-release).
-- Dependabot opens weekly pull requests for Cargo dependencies (`deps` prefix), GitHub Actions
-  (`ci` prefix) and the Dockerfiles' base image digests (`docker` prefix). The Rust builder image
+- Dependabot opens weekly pull requests for Cargo dependencies (the workspace and `fuzz/`, `deps`
+  prefix), GitHub Actions (`ci` prefix) and the base image digests of the Dockerfiles and
+  `.clusterfuzzlite/Dockerfile` (`docker` prefix). The Rust builder image
   stays on the MSRV, so Dependabot updates only its digest.
 
 ---
