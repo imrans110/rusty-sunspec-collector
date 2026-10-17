@@ -29,7 +29,7 @@ buffer = { path = "../buffer" }
 types = { path = "../types" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-sd-notify = "0.4"
+sd-notify = "0.5"
 
 [features]
 # Statically link a vendored OpenSSL (portable ARM binaries; see docs/build.md).
