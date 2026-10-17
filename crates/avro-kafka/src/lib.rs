@@ -137,7 +137,9 @@ pub fn encode(sample: &Sample) -> Result<Vec<u8>, PublishError> {
 
 /// Decodes a message produced by [`encode`]. Fails if the fingerprint does not match.
 pub fn decode(bytes: &[u8]) -> Result<Sample, PublishError> {
-    let reader = GenericSingleObjectReader::new(schema().clone())?;
+    let reader = GenericSingleObjectReader::builder()
+        .schema(schema().clone())
+        .build()?;
     let value = reader.read_value(&mut &bytes[..])?;
     from_value(value)
 }
