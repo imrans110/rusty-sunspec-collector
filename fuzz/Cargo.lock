@@ -109,7 +109,7 @@ version = "0.4.0"
 dependencies = [
  "apache-avro",
  "rdkafka",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tracing",
  "types",
 ]
@@ -235,7 +235,7 @@ name = "buffer"
 version = "0.4.0"
 dependencies = [
  "sqlx",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
 ]
@@ -415,7 +415,7 @@ dependencies = [
 name = "discovery"
 version = "0.4.0"
 dependencies = [
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
  "types",
@@ -1051,7 +1051,7 @@ dependencies = [
 name = "modbus-client"
 version = "0.4.0"
 dependencies = [
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-modbus",
  "tracing",
@@ -1205,7 +1205,7 @@ dependencies = [
  "metrics",
  "modbus-client",
  "sunspec-parser",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
  "types",
