@@ -10,7 +10,7 @@ description = "Per-device poller actors with supervision and backoff"
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-metrics = "0.22"
+metrics = "0.24"
 
 modbus-client = { path = "../modbus-client" }
 sunspec-parser = { path = "../sunspec-parser" }
