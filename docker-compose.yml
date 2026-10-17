@@ -3,6 +3,8 @@
 #   curl localhost:9090/healthz
 #   open http://localhost:9091 (Prometheus)
 #   consume from the host at localhost:29092, topic sunspec.telemetry
+# The collector authenticates to Kafka with SASL/PLAIN on port 9094, reading its password
+# from a Docker secret (docker/dev-secrets, development only).
 
 services:
   kafka:
@@ -12,9 +14,14 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:29092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:29092,SASL_PLAINTEXT://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092,SASL_PLAINTEXT://kafka:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      # listener.name.sasl_plaintext.plain.sasl.jaas.config (`__` becomes `_`).
+      KAFKA_LISTENER_NAME_SASL__PLAINTEXT_PLAIN_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        user_collector="collector-dev-only-secret";
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -49,10 +56,16 @@ services:
     environment:
       SUNSPEC_STATIC_DEVICES: simulator:1,simulator:2
       SUNSPEC_PORT: "1502"
-      SUNSPEC_KAFKA_BROKERS: kafka:9092
+      SUNSPEC_KAFKA_BROKERS: kafka:9094
+      SUNSPEC_KAFKA_SECURITY_PROTOCOL: sasl_plaintext
+      SUNSPEC_KAFKA_SASL_MECHANISM: PLAIN
+      SUNSPEC_KAFKA_SASL_USERNAME: collector
+      SUNSPEC_KAFKA_SASL_PASSWORD_FILE: /run/secrets/kafka_sasl_password
       SUNSPEC_KAFKA_TOPIC: sunspec.telemetry
       SUNSPEC_METRICS_PORT: "9090"
       RUST_LOG: info
+    secrets:
+      - kafka_sasl_password
     volumes:
       - collector-data:/app/data
     depends_on:
@@ -74,3 +87,7 @@ services:
 volumes:
   kafka-data:
   collector-data:
+
+secrets:
+  kafka_sasl_password:
+    file: ./docker/dev-secrets/kafka-sasl-password

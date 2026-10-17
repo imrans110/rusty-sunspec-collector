@@ -9,3 +9,6 @@
 *.swp
 *.swo
 *~
+
+# Test fixtures: public test certificates only (no private keys).
+!crates/*/tests/fixtures/*.pem

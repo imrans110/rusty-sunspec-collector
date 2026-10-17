@@ -513,6 +513,12 @@ A model 103 record, shown as JSON for readability (unions unwrapped, lists short
 `[kafka]` section. An idempotent producer requires `acks=all`, so configuration validation rejects
 `kafka.acks` `0` or `1` while `kafka.enable_idempotence` is true (the default).
 
+Connection security is librdkafka's: `security.protocol` (`plaintext`, `ssl`, `sasl_plaintext`,
+`sasl_ssl`), the `ssl.*` CA, client certificate and key for (mutual) TLS, and SASL `PLAIN` or
+`SCRAM-SHA-256/512` credentials. Passwords are held in a `Secret` type whose debug output is
+redacted and can be read from files at startup. Validation rejects settings that do not match the
+protocol, so a half-configured TLS or SASL setup fails instead of falling back to plaintext.
+
 ### Earlier format
 
 Earlier versions sent one Avro Object Container File per Kafka message, mixing samples from several
@@ -773,8 +779,8 @@ restart loops.
 
 ## Limitations and future work
 
-- Kafka TLS and SASL settings are not exposed in the configuration yet (librdkafka is built with
-  SSL).
+- Kafka authentication is limited to SASL PLAIN and SCRAM (no Kerberos or OAuth); certificates
+  and passwords are read at startup, so rotating them needs a restart.
 - No Schema Registry integration; records use fingerprint-based single-object encoding.
 - Point metadata (units, labels) is not in the payload; consumers look it up by model and point
   name in the bundled definitions.

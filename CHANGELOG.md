@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Config is strict and several metric names changed; see `docs/ops.md` for the rename table and `docs/configuration.md` for deprecated keys.
 
 ### Added
+- Kafka connection security: TLS (`ssl`), mutual TLS, and SASL `PLAIN` / `SCRAM-SHA-256` / `SCRAM-SHA-512` (`sasl_plaintext`, `sasl_ssl`) via new `kafka.security_protocol`, `kafka.ssl_*` and `kafka.sasl_*` settings (and `SUNSPEC_KAFKA_*` variables). Passwords can be read from files (`*_password_file`) for Docker secrets and systemd credentials, are redacted in debug output, and mismatched settings (e.g. `sasl_*` with `plaintext`) fail validation. The compose stack now publishes over SASL/PLAIN with a Docker secret, which the CI Docker E2E job exercises
 - IEEE 1547-2018 DER models 701–713 (AC measurements, capacity, enter service, AC controls, volt-var, volt-watt, voltage/frequency trip curves, frequency droop, watt-var, storage capacity) bundled from the same pinned `sunspec/models` commit
 - `vendored-openssl` cargo feature (collector-app, avro-kafka): builds OpenSSL from source and links it statically; used by the aarch64 cross build so the binary does not depend on the target's OpenSSL
 - Docs: `docs/build.md` (building, Docker images, cross-compiling) and `docs/buffer_maintenance.md` (buffer semantics, retention, sizing, inspection); the October 2026 audit is recorded in `docs/CODE_REVIEW.md`

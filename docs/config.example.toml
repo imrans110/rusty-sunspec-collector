@@ -43,6 +43,13 @@ acks = "all"
 compression = "zstd"
 timeout_ms = 5000
 enable_idempotence = true
+# Connection security (see docs/configuration.md). Example: SCRAM over TLS.
+# security_protocol = "sasl_ssl"          # plaintext, ssl, sasl_plaintext, sasl_ssl
+# ssl_ca_location = "/etc/sunspec-collector/kafka-ca.pem"
+# sasl_mechanism = "SCRAM-SHA-512"        # PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+# sasl_username = "site-0042"
+# sasl_password_file = "/run/credentials/sunspec-collector.service/kafka-password"
+# Mutual TLS instead: security_protocol = "ssl" plus ssl_certificate_location and ssl_key_location.
 
 [metrics]
 port = 9090                     # serves /metrics (Prometheus) and /healthz

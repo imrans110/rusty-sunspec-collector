@@ -193,6 +193,97 @@ fn modbus_batch_size_is_limited_to_the_protocol_maximum() {
     config.validate().expect("125 is the protocol limit");
 }
 
+#[test]
+fn sasl_needs_a_mechanism_username_and_password() {
+    let mut config = CollectorConfig::default();
+    config.kafka_security.protocol = Some("sasl_ssl".to_string());
+    let err = config.validate().expect_err("no mechanism");
+    assert!(err.to_string().contains("kafka.sasl_mechanism"), "{err}");
+
+    config.kafka_security.sasl_mechanism = Some("SCRAM-SHA-512".to_string());
+    config.kafka_security.sasl_username = Some("collector".to_string());
+    let err = config.validate().expect_err("no password");
+    assert!(err.to_string().contains("kafka.sasl_password"), "{err}");
+
+    config.kafka_security.sasl_password = Some(avro_kafka::Secret::new("secret"));
+    config.validate().expect("complete SASL settings");
+
+    config.kafka_security.sasl_mechanism = Some("GSSAPI".to_string());
+    assert!(config.validate().is_err(), "unsupported mechanism");
+}
+
+#[test]
+fn security_settings_must_match_the_protocol() {
+    let mut config = CollectorConfig::default();
+    config.kafka_security.sasl_username = Some("collector".to_string());
+    let err = config
+        .validate()
+        .expect_err("SASL settings without a SASL protocol");
+    assert!(
+        err.to_string().contains("sasl_plaintext or sasl_ssl"),
+        "{err}"
+    );
+
+    let mut config = CollectorConfig::default();
+    config.kafka_security.protocol = Some("ssl".to_string());
+    config.kafka_security.ssl_ca_location = Some("/no/such/ca.pem".to_string());
+    let err = config.validate().expect_err("missing CA file");
+    assert!(err.to_string().contains("/no/such/ca.pem"), "{err}");
+
+    config.kafka_security.ssl_ca_location = None;
+    config.kafka_security.ssl_certificate_location = Some(write_temp("client.pem", "cert"));
+    let err = config.validate().expect_err("certificate without key");
+    assert!(err.to_string().contains("set together"), "{err}");
+
+    config.kafka_security.protocol = Some("tls".to_string());
+    assert!(config.validate().is_err(), "unknown protocol");
+}
+
+#[test]
+fn sasl_password_is_read_from_a_file_and_never_printed() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let password_file = write_temp("kafka-password", "s3cr3t-from-file\n");
+    env::set_var("SUNSPEC_KAFKA_SECURITY_PROTOCOL", "sasl_ssl");
+    env::set_var("SUNSPEC_KAFKA_SASL_MECHANISM", "PLAIN");
+    env::set_var("SUNSPEC_KAFKA_SASL_USERNAME", "collector");
+    env::set_var("SUNSPEC_KAFKA_SASL_PASSWORD_FILE", &password_file);
+
+    let loaded = CollectorConfig::load();
+    env::set_var("SUNSPEC_KAFKA_SASL_PASSWORD", "also-set");
+    let both = CollectorConfig::load();
+
+    for key in [
+        "SUNSPEC_KAFKA_SECURITY_PROTOCOL",
+        "SUNSPEC_KAFKA_SASL_MECHANISM",
+        "SUNSPEC_KAFKA_SASL_USERNAME",
+        "SUNSPEC_KAFKA_SASL_PASSWORD_FILE",
+        "SUNSPEC_KAFKA_SASL_PASSWORD",
+    ] {
+        env::remove_var(key);
+    }
+    let _ = std::fs::remove_file(&password_file);
+
+    let config = loaded.expect("load");
+    config.validate().expect("valid SASL config");
+    let password = config
+        .kafka_security
+        .sasl_password
+        .as_ref()
+        .expect("password");
+    assert_eq!(
+        password.expose(),
+        "s3cr3t-from-file",
+        "trailing newline trimmed"
+    );
+    assert!(
+        !format!("{config:?}").contains("s3cr3t"),
+        "secret in Debug output"
+    );
+
+    let err = both.expect_err("password and password file together");
+    assert!(format!("{err:#}").contains("only one of"), "{err:#}");
+}
+
 fn write_temp(name: &str, content: &str) -> String {
     let path = std::env::temp_dir().join(format!("{}-{name}", std::process::id()));
     std::fs::write(&path, content).expect("write temp config");

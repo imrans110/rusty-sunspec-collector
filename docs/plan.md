@@ -331,13 +331,13 @@ Updated October 2026 after the audit fixes; see [Code Review](CODE_REVIEW.md).
 - [x] Add repeating group support for SunSpec parser (e.g. MPPT modules, `group[i].Point`).
 - [ ] Add per-device polling profiles (model filters, interval overrides, device-specific quirks).
 - [ ] Add backpressure from buffer depth to pollers (today: a full channel drops and counts samples, and retention bounds the buffer).
-- [ ] Add Kafka TLS/SASL configuration + secret loading strategy.
+- [x] Add Kafka TLS/SASL configuration + secret loading strategy (TLS, mutual TLS, SASL PLAIN/SCRAM; passwords from files for Docker secrets and systemd credentials).
 - [ ] Add Schema Registry integration + schema evolution policy docs (records use Avro single-object encoding with the schema fingerprint today).
 - [x] Add Prometheus metrics exporter (poll latency, queue depth, uplink throughput) with histograms and help text.
 - [ ] Add config reload support (SIGHUP) with validation + safe rollback.
 - [x] Add buffer retention policy (size/age-based pruning) + scheduled maintenance job.
 - [ ] Add buffer compaction and integrity checks for flash endurance.
-- [ ] Add certificate rotation workflow for Kafka TLS credentials.
+- [ ] Add certificate rotation workflow for Kafka TLS credentials (today: certificates are read at startup; restart after rotating).
 - [ ] Add structured error taxonomy + error-to-metric mapping (partly done: `sunspec_poll_errors_total{kind}` and `sunspec_buffer_dropped_total{reason}`).
 - [ ] Add data quality flags (stale, partial, invalid, retries) in uplink payloads.
 - [x] Add device health checks (`sunspec_device_up`, last-successful poll, stall detection; models are rediscovered on every reconnect).

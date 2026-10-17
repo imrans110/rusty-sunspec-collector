@@ -10,6 +10,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use tracing::warn;
 
+use avro_kafka::{KafkaSecurity, Secret};
 use discovery::DiscoveryConfig;
 use modbus_client::ClientConfig;
 use poller_actor::ActorConfig;
@@ -29,6 +30,8 @@ const DEFAULT_METRICS_PORT: u16 = 9090;
 
 const KAFKA_COMPRESSION: &[&str] = &["none", "gzip", "snappy", "lz4", "zstd"];
 const KAFKA_ACKS: &[&str] = &["0", "1", "-1", "all"];
+const KAFKA_SECURITY_PROTOCOLS: &[&str] = &["plaintext", "ssl", "sasl_plaintext", "sasl_ssl"];
+const KAFKA_SASL_MECHANISMS: &[&str] = &["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"];
 
 #[derive(Clone, Debug)]
 pub struct CollectorConfig {
@@ -56,6 +59,8 @@ pub struct CollectorConfig {
     pub kafka_timeout_ms: Option<u64>,
     pub kafka_topic: Option<String>,
     pub kafka_enable_idempotence: Option<bool>,
+    /// TLS and SASL settings; secrets are redacted in `Debug` output.
+    pub kafka_security: KafkaSecurity,
     /// Port for `/metrics` and `/healthz` (0 picks a free port).
     pub metrics_port: u16,
 }
@@ -171,6 +176,7 @@ impl CollectorConfig {
                 bail!("kafka.acks must be all (or -1) while kafka.enable_idempotence is true");
             }
         }
+        validate_kafka_security(&self.kafka_security)?;
 
         Ok(())
     }
@@ -199,6 +205,7 @@ impl Default for CollectorConfig {
             kafka_timeout_ms: None,
             kafka_topic: None,
             kafka_enable_idempotence: None,
+            kafka_security: KafkaSecurity::default(),
             metrics_port: DEFAULT_METRICS_PORT,
         }
     }
@@ -324,6 +331,39 @@ fn apply_env_overrides(config: &mut CollectorConfig) -> Result<()> {
     if let Some(value) = env_parse("SUNSPEC_KAFKA_IDEMPOTENCE")? {
         config.kafka_enable_idempotence = Some(value);
     }
+    let security = &mut config.kafka_security;
+    if let Some(value) = env_string("SUNSPEC_KAFKA_SECURITY_PROTOCOL")? {
+        security.protocol = Some(value);
+    }
+    if let Some(value) = env_string("SUNSPEC_KAFKA_SSL_CA_LOCATION")? {
+        security.ssl_ca_location = Some(value);
+    }
+    if let Some(value) = env_string("SUNSPEC_KAFKA_SSL_CERTIFICATE_LOCATION")? {
+        security.ssl_certificate_location = Some(value);
+    }
+    if let Some(value) = env_string("SUNSPEC_KAFKA_SSL_KEY_LOCATION")? {
+        security.ssl_key_location = Some(value);
+    }
+    if let Some(secret) = secret_setting(
+        "SUNSPEC_KAFKA_SSL_KEY_PASSWORD",
+        env_string("SUNSPEC_KAFKA_SSL_KEY_PASSWORD")?,
+        env_string("SUNSPEC_KAFKA_SSL_KEY_PASSWORD_FILE")?,
+    )? {
+        security.ssl_key_password = Some(secret);
+    }
+    if let Some(value) = env_string("SUNSPEC_KAFKA_SASL_MECHANISM")? {
+        security.sasl_mechanism = Some(value);
+    }
+    if let Some(value) = env_string("SUNSPEC_KAFKA_SASL_USERNAME")? {
+        security.sasl_username = Some(value);
+    }
+    if let Some(secret) = secret_setting(
+        "SUNSPEC_KAFKA_SASL_PASSWORD",
+        env_string("SUNSPEC_KAFKA_SASL_PASSWORD")?,
+        env_string("SUNSPEC_KAFKA_SASL_PASSWORD_FILE")?,
+    )? {
+        security.sasl_password = Some(secret);
+    }
     Ok(())
 }
 
@@ -411,6 +451,16 @@ struct FileKafkaConfig {
     compression: Option<String>,
     timeout_ms: Option<u64>,
     enable_idempotence: Option<bool>,
+    security_protocol: Option<String>,
+    ssl_ca_location: Option<String>,
+    ssl_certificate_location: Option<String>,
+    ssl_key_location: Option<String>,
+    ssl_key_password: Option<String>,
+    ssl_key_password_file: Option<String>,
+    sasl_mechanism: Option<String>,
+    sasl_username: Option<String>,
+    sasl_password: Option<String>,
+    sasl_password_file: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -569,6 +619,39 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) -> Result<(
         if kafka.enable_idempotence.is_some() {
             config.kafka_enable_idempotence = kafka.enable_idempotence;
         }
+        let security = &mut config.kafka_security;
+        if kafka.security_protocol.is_some() {
+            security.protocol = kafka.security_protocol;
+        }
+        if kafka.ssl_ca_location.is_some() {
+            security.ssl_ca_location = kafka.ssl_ca_location;
+        }
+        if kafka.ssl_certificate_location.is_some() {
+            security.ssl_certificate_location = kafka.ssl_certificate_location;
+        }
+        if kafka.ssl_key_location.is_some() {
+            security.ssl_key_location = kafka.ssl_key_location;
+        }
+        if let Some(secret) = secret_setting(
+            "kafka.ssl_key_password",
+            kafka.ssl_key_password,
+            kafka.ssl_key_password_file,
+        )? {
+            security.ssl_key_password = Some(secret);
+        }
+        if kafka.sasl_mechanism.is_some() {
+            security.sasl_mechanism = kafka.sasl_mechanism;
+        }
+        if kafka.sasl_username.is_some() {
+            security.sasl_username = kafka.sasl_username;
+        }
+        if let Some(secret) = secret_setting(
+            "kafka.sasl_password",
+            kafka.sasl_password,
+            kafka.sasl_password_file,
+        )? {
+            security.sasl_password = Some(secret);
+        }
     }
 
     if let Some(metrics) = file.metrics {
@@ -622,6 +705,88 @@ fn parse_unit_id_list(value: &str) -> Result<Vec<u8>> {
 fn validate_host(host: &str) -> Result<()> {
     if host.is_empty() || host.contains(char::is_whitespace) {
         bail!("device host must be a non-empty IP address or hostname");
+    }
+    Ok(())
+}
+
+/// A secret given either directly or as `<name>_file` (a file holding only the secret,
+/// e.g. a Docker secret or a systemd credential). Setting both is an error.
+fn secret_setting(
+    name: &str,
+    value: Option<String>,
+    file: Option<String>,
+) -> Result<Option<Secret>> {
+    match (value, file) {
+        (Some(_), Some(_)) => bail!("set only one of {name} and {name}_file"),
+        (Some(value), None) => Ok(Some(Secret::new(value))),
+        (None, Some(path)) => {
+            let content =
+                fs::read_to_string(&path).with_context(|| format!("read {name}_file {path}"))?;
+            let secret = content.trim_end_matches(['\r', '\n']);
+            if secret.is_empty() {
+                bail!("{name}_file {path} is empty");
+            }
+            Ok(Some(Secret::new(secret)))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn validate_kafka_security(security: &KafkaSecurity) -> Result<()> {
+    let protocol = security.protocol.as_deref().unwrap_or("plaintext");
+    ensure_one_of(
+        "kafka.security_protocol",
+        protocol,
+        KAFKA_SECURITY_PROTOCOLS,
+    )?;
+    let uses_sasl = protocol.starts_with("sasl_");
+    let uses_ssl = protocol == "ssl" || protocol == "sasl_ssl";
+
+    let sasl_set = security.sasl_mechanism.is_some()
+        || security.sasl_username.is_some()
+        || security.sasl_password.is_some();
+    if uses_sasl {
+        let mechanism = security
+            .sasl_mechanism
+            .as_deref()
+            .ok_or_else(|| anyhow!("kafka.sasl_mechanism is required with {protocol}"))?;
+        ensure_one_of("kafka.sasl_mechanism", mechanism, KAFKA_SASL_MECHANISMS)?;
+        if security.sasl_username.as_deref().unwrap_or("").is_empty() {
+            bail!("kafka.sasl_username is required with {protocol}");
+        }
+        if security.sasl_password.is_none() {
+            bail!("kafka.sasl_password (or kafka.sasl_password_file) is required with {protocol}");
+        }
+        if protocol == "sasl_plaintext" {
+            warn!("kafka.security_protocol is sasl_plaintext: credentials and data are sent unencrypted");
+        }
+    } else if sasl_set {
+        bail!("kafka.sasl_* settings need kafka.security_protocol sasl_plaintext or sasl_ssl (got {protocol})");
+    }
+
+    let ssl_set = security.ssl_ca_location.is_some()
+        || security.ssl_certificate_location.is_some()
+        || security.ssl_key_location.is_some()
+        || security.ssl_key_password.is_some();
+    if !uses_ssl && ssl_set {
+        bail!("kafka.ssl_* settings need kafka.security_protocol ssl or sasl_ssl (got {protocol})");
+    }
+    if security.ssl_certificate_location.is_some() != security.ssl_key_location.is_some() {
+        bail!("kafka.ssl_certificate_location and kafka.ssl_key_location must be set together");
+    }
+    for (name, path) in [
+        ("kafka.ssl_ca_location", &security.ssl_ca_location),
+        (
+            "kafka.ssl_certificate_location",
+            &security.ssl_certificate_location,
+        ),
+        ("kafka.ssl_key_location", &security.ssl_key_location),
+    ] {
+        if let Some(path) = path {
+            if !Path::new(path).exists() {
+                bail!("{name} {path} does not exist");
+            }
+        }
     }
     Ok(())
 }

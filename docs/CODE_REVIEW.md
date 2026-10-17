@@ -58,7 +58,7 @@ merged. The 17 findings below were fixed in #11–#17.
 
 ### Remaining limitations
 
-- Kafka TLS/SASL settings are not yet exposed in config (librdkafka is built with SSL).
+- Kafka authentication is limited to SASL PLAIN and SCRAM (TLS, mutual TLS and SASL were added after the audit).
 - There's no Schema Registry integration. Records carry the schema's fingerprint instead.
 - Delivery is at-least-once. Consumers should deduplicate on `(device_key, model_id, collected_at_ms)`.
 - There's no config reload and no per-device polling profiles.

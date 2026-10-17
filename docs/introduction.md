@@ -111,7 +111,7 @@ Compose stack is running.
 
 ## Known limitations
 
-- Kafka TLS and SASL settings are not exposed in the configuration yet.
+- Kafka authentication is limited to SASL PLAIN and SCRAM (no Kerberos or OAuth).
 - No Schema Registry integration; records use fingerprint-based single-object encoding.
 - Point units and labels are not in the payload; look them up by model and point name in the
   bundled SunSpec definitions.

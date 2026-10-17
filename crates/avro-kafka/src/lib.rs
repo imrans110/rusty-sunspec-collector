@@ -48,6 +48,46 @@ pub struct KafkaConfig {
     pub compression: String,
     pub message_timeout_ms: u64,
     pub enable_idempotence: bool,
+    pub security: KafkaSecurity,
+}
+
+/// Connection security: TLS and SASL settings passed to librdkafka.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KafkaSecurity {
+    /// `plaintext`, `ssl`, `sasl_plaintext` or `sasl_ssl` (`None` = librdkafka's default,
+    /// plaintext).
+    pub protocol: Option<String>,
+    /// CA certificate file (PEM) or directory used to verify the broker.
+    pub ssl_ca_location: Option<String>,
+    /// Client certificate (PEM) for mutual TLS.
+    pub ssl_certificate_location: Option<String>,
+    /// Client private key (PEM) for mutual TLS.
+    pub ssl_key_location: Option<String>,
+    pub ssl_key_password: Option<Secret>,
+    /// `PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512`.
+    pub sasl_mechanism: Option<String>,
+    pub sasl_username: Option<String>,
+    pub sasl_password: Option<Secret>,
+}
+
+/// A secret value whose `Debug` output is redacted, so it cannot leak into logs.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(<redacted>)")
+    }
 }
 
 impl Default for KafkaConfig {
@@ -59,6 +99,7 @@ impl Default for KafkaConfig {
             compression: "zstd".to_string(),
             message_timeout_ms: 5_000,
             enable_idempotence: true,
+            security: KafkaSecurity::default(),
         }
     }
 }
@@ -248,7 +289,33 @@ pub struct Publisher {
 
 impl Publisher {
     pub fn new_kafka(topic: impl Into<String>, config: KafkaConfig) -> Result<Self, PublishError> {
-        let producer: FutureProducer = ClientConfig::new()
+        let mut client = ClientConfig::new();
+        let security = &config.security;
+        let optional = [
+            ("security.protocol", security.protocol.as_deref()),
+            ("ssl.ca.location", security.ssl_ca_location.as_deref()),
+            (
+                "ssl.certificate.location",
+                security.ssl_certificate_location.as_deref(),
+            ),
+            ("ssl.key.location", security.ssl_key_location.as_deref()),
+            (
+                "ssl.key.password",
+                security.ssl_key_password.as_ref().map(Secret::expose),
+            ),
+            ("sasl.mechanism", security.sasl_mechanism.as_deref()),
+            ("sasl.username", security.sasl_username.as_deref()),
+            (
+                "sasl.password",
+                security.sasl_password.as_ref().map(Secret::expose),
+            ),
+        ];
+        for (key, value) in optional {
+            if let Some(value) = value {
+                client.set(key, value);
+            }
+        }
+        let producer: FutureProducer = client
             .set("bootstrap.servers", &config.brokers)
             .set("client.id", &config.client_id)
             .set("acks", &config.acks)
