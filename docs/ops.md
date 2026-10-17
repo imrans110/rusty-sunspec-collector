@@ -29,7 +29,7 @@ records are published twice, and they can fail with "database is locked".
 Releases publish multi-arch (`linux/amd64`, `linux/arm64`) images to GHCR:
 
 ```sh
-docker pull ghcr.io/imrans110/sunspec-collector:latest     # or a version, e.g. :0.2.0
+docker pull ghcr.io/imrans110/sunspec-collector:latest     # or a version, e.g. :0.4.0
 docker pull ghcr.io/imrans110/sunspec-simulator:latest
 ```
 
@@ -153,7 +153,7 @@ release, checks the archive's checksum, and installs:
 | `/usr/local/share/doc/sunspec-collector/` | README, CHANGELOG, licenses, `config.example.toml` and the shipped environment file |
 
 It runs `systemctl daemon-reload` but does not start or restart the service; after an upgrade, run
-`sudo systemctl restart sunspec-collector`. `SUNSPEC_VERSION=0.2.0` installs a specific release.
+`sudo systemctl restart sunspec-collector`. `SUNSPEC_VERSION=0.4.0` installs a specific release.
 To read the script first: `curl -fsSLO <url>`, read `install.sh`, then `sudo sh install.sh`.
 
 To install from a downloaded archive by hand, use the archive's files in the steps below instead

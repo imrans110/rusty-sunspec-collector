@@ -74,7 +74,7 @@ The script checks the archive against the release's `SHA256SUMS` and installs `c
 `sunspec-sim` in `/usr/local/bin`, the systemd unit, and `/etc/sunspec-collector.env` (kept on
 upgrades). Set your devices and Kafka brokers there, then run
 `sudo systemctl enable --now sunspec-collector`. To read the script before running it, download it
-and run `sudo sh install.sh`; `SUNSPEC_VERSION=0.2.0` picks a specific release.
+and run `sudo sh install.sh`; `SUNSPEC_VERSION=0.4.0` picks a specific release.
 
 With Docker:
 
