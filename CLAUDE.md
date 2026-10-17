@@ -66,7 +66,15 @@ when code changed (crates, Cargo files, Docker files, compose, `fixtures/`, `ci.
 files tests read: `docs/configuration.md`, `docs/config.example.toml`,
 `docs/sunspec-collector.env`); Security Audit only when a `Cargo.toml`, `Cargo.lock` or `ci.yml`
 changed. Skipped required jobs count as passing. Keep the list in `ci.yml` in step when tests or
-the image start reading another file. `audit.yml` audits `main` daily.
+the image start reading another file. `audit.yml` audits `main` daily. `scorecard.yml` runs
+OpenSSF Scorecard (README badge, Security tab); it must stay minimal (no top-level env or
+defaults, only checkout, upload-artifact, upload-sarif and scorecard-action).
+
+Workflow hygiene: pin actions to a full commit SHA with the release as a comment
+(`@<sha> # v6.1.0`), Docker base images by digest (the release matrix passes each target's
+pinned cross-rs image as `BASE_IMAGE` to `docker/Dockerfile.cross`); top-level `permissions:
+contents: read`, with write scopes granted per job. Dependabot updates actions, Cargo and the
+Dockerfiles' digests.
 
 ## Conventions
 

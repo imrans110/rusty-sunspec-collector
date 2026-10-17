@@ -43,7 +43,7 @@ jobs:
       prerelease: ${{ steps.version.outputs.prerelease }}
       publish: ${{ steps.version.outputs.publish }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
 
@@ -93,10 +93,12 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
+            cross_image: ghcr.io/cross-rs/x86_64-unknown-linux-gnu:0.2.5@sha256:9e5b39c09874bc1816c675ed11afca2c2ed6cee0c4ed2b3c1d5763c346c9ae3f
             deb_arch: amd64
             multiarch: x86_64-linux-gnu
             elf_machine: X86-64
           - target: aarch64-unknown-linux-gnu
+            cross_image: ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5@sha256:7f8308a8734d9fcd2ebbe9a3e4bdea74af293f0799d80c3cc341e340cda49a4c
             deb_arch: arm64
             multiarch: aarch64-linux-gnu
             elf_machine: AArch64
@@ -104,24 +106,26 @@ jobs:
       TARGET: ${{ matrix.target }}
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-${{ matrix.target }}
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cross
 
       - name: Build the cross image
         run: |
           docker build -t "sunspec-cross-$TARGET" -f docker/Dockerfile.cross \
-            --build-arg "TARGET=$TARGET" --build-arg "DEB_ARCH=${{ matrix.deb_arch }}" \
+            --build-arg "BASE_IMAGE=${{ matrix.cross_image }}" \
+            --build-arg "DEB_ARCH=${{ matrix.deb_arch }}" \
             --build-arg "MULTIARCH=${{ matrix.multiarch }}" docker
 
       - name: Build
@@ -159,7 +163,7 @@ jobs:
       - name: Package
         run: scripts/package-release.sh "$VERSION" "$TARGET" "target/$TARGET/release"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: archive-${{ matrix.target }}
           path: dist/sunspec-collector-*.tar.gz
@@ -174,9 +178,9 @@ jobs:
       CRATE_VERSION: ${{ needs.prepare.outputs.crate_version }}
       NOTES_SECTION: ${{ needs.prepare.outputs.notes_section }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: archive-*
           path: dist
@@ -257,7 +261,7 @@ jobs:
           } > dist/RELEASE_NOTES.md
           cat dist/RELEASE_NOTES.md
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release
           path: dist/
@@ -287,9 +291,9 @@ jobs:
       CRATE_VERSION: ${{ needs.prepare.outputs.crate_version }}
       PUBLISH: ${{ needs.prepare.outputs.publish }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release
           path: dist
@@ -308,9 +312,9 @@ jobs:
           done
           ls -lR dist/bin
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Smoke-test each platform
         run: |
@@ -323,7 +327,7 @@ jobs:
           done
 
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
@@ -342,14 +346,14 @@ jobs:
             org.opencontainers.image.licenses=MIT OR Apache-2.0
 
       - if: env.PUBLISH == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build linux/amd64 and linux/arm64 (pushed on a tag)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           target: ${{ matrix.target }}
@@ -368,7 +372,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release
           path: dist

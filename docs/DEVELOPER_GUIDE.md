@@ -69,7 +69,8 @@ rusty-sunspec-collector/
     workflows/ci.yml          fmt, clippy, build, test, cargo audit, Docker E2E
     workflows/release.yml     Release archives and images (dry run unless a v* tag)
     workflows/deploy-docs.yml mdBook -> GitHub Pages
-    dependabot.yml            Weekly Cargo and GitHub Actions updates
+    workflows/scorecard.yml   OpenSSF Scorecard (README badge, Security tab)
+    dependabot.yml            Weekly Cargo, GitHub Actions and Docker image updates
     ISSUE_TEMPLATE/           Issue forms: bug report, feature request, device report
     pull_request_template.md  PR checklist
   crates/
@@ -393,9 +394,22 @@ A new push to a pull request cancels that PR's run in progress. `audit.yml` runs
 on `main` every day as well, because advisories are published for dependencies that have not
 changed.
 
-Other workflows: `audit.yml` is the daily audit above, `release.yml` builds and tests the release archives and images, and publishes
-them on a `v*` tag (see [Building & Packaging](build.md#release-workflow)), and `deploy-docs.yml` publishes this
-book to GitHub Pages on pushes to `main` that touch `docs/` or `README.md` (mdBook 0.4.40).
+Other workflows: `audit.yml` is the daily audit above, `release.yml` builds and tests the
+release archives and images, and publishes them on a `v*` tag (see
+[Building & Packaging](build.md#release-workflow)), `deploy-docs.yml` publishes this book to
+GitHub Pages on pushes to `main` that touch `docs/` or `README.md` (mdBook 0.4.40), and
+`scorecard.yml` runs [OpenSSF Scorecard](https://scorecard.dev/) weekly and on pushes to `main`,
+publishing the score behind the README badge and the findings to the repository's Security tab.
+
+Workflow hygiene, which Scorecard checks:
+
+- Every action is pinned to a full commit SHA, with the release it is in as a comment
+  (`uses: actions/checkout@<sha> # v6.1.0`); `dtolnay/rust-toolchain` is pinned to a commit on
+  its `master` branch and given `toolchain: stable`. Base images in the Dockerfiles are pinned by
+  digest, with the tag kept for readers, and the release workflow passes each target's pinned
+  cross-rs image to `docker/Dockerfile.cross`. Dependabot proposes new SHAs and digests weekly.
+- Each workflow's top-level `permissions` is `contents: read`; a job that needs more (publishing
+  images, releases or Pages) asks for it in its own `permissions`.
 
 The CI jobs use the latest stable Rust; the Docker images are built with Rust 1.88, so the Docker
 E2E job is the one that exercises the MSRV.
@@ -505,8 +519,9 @@ the change in the CHANGELOG.
 - All crates share one version, `version` under `[workspace.package]` in `Cargo.toml`. Releases are
   published by `.github/workflows/release.yml` when a `v*` tag is pushed; the steps are in
   [Cutting a release](build.md#cutting-a-release).
-- Dependabot opens weekly pull requests for Cargo dependencies (`deps` prefix) and GitHub Actions
-  (`ci` prefix).
+- Dependabot opens weekly pull requests for Cargo dependencies (`deps` prefix), GitHub Actions
+  (`ci` prefix) and the Dockerfiles' base image digests (`docker` prefix). The Rust builder image
+  stays on the MSRV, so Dependabot updates only its digest.
 
 ---
 

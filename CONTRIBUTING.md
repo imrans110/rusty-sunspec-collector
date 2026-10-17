@@ -93,6 +93,9 @@ the multi-arch images without publishing them.
   connections, offline devices) for failure-path tests.
 - Update the documentation in `docs/` and the `[Unreleased]` section of `CHANGELOG.md` when you
   change behaviour, configuration, metrics or the Kafka record format. Mark breaking changes.
+- In workflows, pin every action to a full commit SHA with its release as a comment
+  (`uses: owner/action@<sha> # v1.2.3`), keep the top-level `permissions` at `contents: read`
+  and grant more per job; pin Docker base images by digest. Dependabot keeps the pins current.
 - All CI checks must pass before a PR is merged. A PR that changes only documentation (other
   than the docs files the tests read) skips the build, test and Docker jobs; see the CI section
   of the [Developer Guide](docs/DEVELOPER_GUIDE.md#ci).

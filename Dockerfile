@@ -5,8 +5,9 @@
 # workflow packages the binaries it cross-compiled instead of compiling under emulation.
 ARG BINARIES=builder
 
-# Build stage: compiles the collector and the device simulator.
-FROM rust:1.88-slim-bookworm AS builder
+# Build stage: compiles the collector and the device simulator. Base images are pinned by digest
+# (Dependabot proposes updates); the tag says which release the digest is.
+FROM rust:1.88-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89 AS builder
 
 # cmake builds librdkafka; librdkafka 2.12 also needs the curl headers to compile.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -36,7 +37,7 @@ COPY dist/bin/${TARGETARCH}/collector-app dist/bin/${TARGETARCH}/sunspec-sim /ou
 FROM ${BINARIES} AS binaries
 
 # Shared runtime base.
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS runtime
 
 # ca-certificates and libssl3 for Kafka TLS, curl for the health check.
 RUN apt-get update && apt-get install -y --no-install-recommends \
