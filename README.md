@@ -97,7 +97,7 @@ The script checks the archive against the release's `SHA256SUMS` and installs `c
 `sunspec-sim` in `/usr/local/bin`, the systemd unit, and `/etc/sunspec-collector.env` (kept on
 upgrades). Set your devices and Kafka brokers there, then run
 `sudo systemctl enable --now sunspec-collector`. To read the script before running it, download it
-and run `sudo sh install.sh`; `SUNSPEC_VERSION=0.4.0` picks a specific release. From 0.5.0 the
+and run `sudo sh install.sh`; `SUNSPEC_VERSION=0.5.0` picks a specific release. From 0.5.0 the
 release files and images carry signed build provenance; `gh attestation verify <file> --repo
 imrans110/rusty-sunspec-collector` checks a download (see
 [Verifying a release](docs/build.md#verifying-a-release)).

@@ -278,8 +278,8 @@ docker buildx build --platform linux/amd64,linux/arm64 --build-arg BINARIES=preb
 ```
 
 The published images are `ghcr.io/imrans110/sunspec-collector` and
-`ghcr.io/imrans110/sunspec-simulator`, tagged with the version (`0.4.0`), the minor series
-(`0.4`), `latest` for the newest non-prerelease, and `sha-<commit>`.
+`ghcr.io/imrans110/sunspec-simulator`, tagged with the version (`0.5.0`), the minor series
+(`0.5`), `latest` for the newest non-prerelease, and `sha-<commit>`.
 
 ### Release workflow
 
@@ -333,8 +333,8 @@ so `install.sh`'s checksum check then ties the installed archive to the attested
 
    ```sh
    git switch main && git pull
-   git tag -a v0.5.0 -m "v0.5.0"
-   git push origin v0.5.0
+   git tag -a v0.6.0 -m "v0.6.0"
+   git push origin v0.6.0
    ```
 
 4. The workflow publishes the images and the release. The GHCR packages are linked to this
