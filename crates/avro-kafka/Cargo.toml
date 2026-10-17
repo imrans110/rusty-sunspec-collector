@@ -14,6 +14,10 @@ rdkafka = { version = "0.39", features = ["cmake-build", "ssl", "tokio", "zstd"]
 
 types = { path = "../types" }
 
+[features]
+# Build OpenSSL from source and link it statically (used for cross-compiled binaries).
+vendored-openssl = ["rdkafka/ssl-vendored"]
+
 [dev-dependencies]
 tokio = { workspace = true }
 apache-avro = "0.21"

@@ -38,7 +38,7 @@ jobs:
         run: docker build -t sunspec-cross-arm64 -f docker/Dockerfile.arm64 .
 
       - name: Build
-        run: cross build --release --locked --target aarch64-unknown-linux-gnu -p collector-app
+        run: cross build --release --locked --target aarch64-unknown-linux-gnu -p collector-app --features vendored-openssl
 
       - name: Check the binary
         run: file target/aarch64-unknown-linux-gnu/release/collector-app | tee /dev/stderr | grep -q "ARM aarch64"
