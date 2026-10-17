@@ -20,6 +20,9 @@ const DEFAULT_RESPAWN_DELAY_MS: u64 = 1_000;
 const DEFAULT_BUFFER_PATH: &str = "sunspec-buffer.sqlite";
 const DEFAULT_BUFFER_BATCH_SIZE: i64 = 100;
 const DEFAULT_BUFFER_DRAIN_INTERVAL_MS: u64 = 500;
+const DEFAULT_BUFFER_MAX_ROWS: i64 = 1_000_000;
+const DEFAULT_BUFFER_MAX_AGE_S: u64 = 7 * 24 * 3_600;
+const DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS: u64 = 5_000;
 
 #[derive(Clone, Debug)]
 pub struct CollectorConfig {
@@ -35,6 +38,12 @@ pub struct CollectorConfig {
     pub buffer_path: String,
     pub buffer_batch_size: i64,
     pub buffer_drain_interval_ms: u64,
+    /// Oldest rows beyond this count are dropped during long uplink outages.
+    pub buffer_max_rows: i64,
+    /// Rows older than this are dropped during long uplink outages.
+    pub buffer_max_age_s: u64,
+    /// How long to keep draining to Kafka after a stop signal (0 = stop at once).
+    pub shutdown_drain_timeout_ms: u64,
     pub kafka_brokers: Option<String>,
     pub kafka_client_id: Option<String>,
     pub kafka_acks: Option<String>,
@@ -120,6 +129,12 @@ impl CollectorConfig {
         if self.buffer_drain_interval_ms == 0 {
             anyhow::bail!("buffer.drain_interval_ms must be >= 1");
         }
+        if self.buffer_max_rows <= 0 {
+            anyhow::bail!("buffer.max_rows must be >= 1");
+        }
+        if self.buffer_max_age_s == 0 {
+            anyhow::bail!("buffer.max_age_s must be >= 1");
+        }
         if let Some(timeout_ms) = self.kafka_timeout_ms {
             if timeout_ms == 0 {
                 anyhow::bail!("kafka.timeout_ms must be >= 1");
@@ -152,6 +167,9 @@ impl Default for CollectorConfig {
             buffer_path: DEFAULT_BUFFER_PATH.to_string(),
             buffer_batch_size: DEFAULT_BUFFER_BATCH_SIZE,
             buffer_drain_interval_ms: DEFAULT_BUFFER_DRAIN_INTERVAL_MS,
+            buffer_max_rows: DEFAULT_BUFFER_MAX_ROWS,
+            buffer_max_age_s: DEFAULT_BUFFER_MAX_AGE_S,
+            shutdown_drain_timeout_ms: DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS,
             kafka_brokers: None,
             kafka_client_id: None,
             kafka_acks: None,
@@ -213,6 +231,15 @@ fn apply_env_overrides(config: &mut CollectorConfig) {
 
     if let Some(value) = parse_env_u64("SUNSPEC_BUFFER_DRAIN_MS") {
         config.buffer_drain_interval_ms = value;
+    }
+    if let Some(value) = parse_env_i64("SUNSPEC_BUFFER_MAX_ROWS") {
+        config.buffer_max_rows = value;
+    }
+    if let Some(value) = parse_env_u64("SUNSPEC_BUFFER_MAX_AGE_S") {
+        config.buffer_max_age_s = value;
+    }
+    if let Some(value) = parse_env_u64("SUNSPEC_SHUTDOWN_DRAIN_TIMEOUT_MS") {
+        config.shutdown_drain_timeout_ms = value;
     }
 
     config.base_address = parse_env_u16("SUNSPEC_BASE_ADDRESS").unwrap_or(config.base_address);
@@ -310,6 +337,9 @@ struct FileBufferConfig {
     path: Option<String>,
     batch_size: Option<i64>,
     drain_interval_ms: Option<u64>,
+    max_rows: Option<i64>,
+    max_age_s: Option<u64>,
+    shutdown_drain_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -436,6 +466,15 @@ fn apply_file_config(config: &mut CollectorConfig, file: FileConfig) {
         }
         if let Some(interval) = buffer.drain_interval_ms {
             config.buffer_drain_interval_ms = interval;
+        }
+        if let Some(max_rows) = buffer.max_rows {
+            config.buffer_max_rows = max_rows;
+        }
+        if let Some(max_age) = buffer.max_age_s {
+            config.buffer_max_age_s = max_age;
+        }
+        if let Some(timeout) = buffer.shutdown_drain_timeout_ms {
+            config.shutdown_drain_timeout_ms = timeout;
         }
     }
 

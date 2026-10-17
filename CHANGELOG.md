@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Buffer retention: `buffer.max_rows` (default 1,000,000) and `buffer.max_age_s` (default 7 days) bound the buffer during long uplink outages; dropped rows are counted in `sunspec_buffer_dropped_total{reason}`, with `sunspec_buffer_rows` and `sunspec_buffer_oldest_age_seconds` gauges
+- `buffer.shutdown_drain_timeout_ms` (default 5 s): on stop, the uplink keeps draining to Kafka for up to this long after ingest has persisted everything
 - Per-device supervision: each device runs connect → discover → poll and is retried with exponential backoff (capped at 60 s) until shutdown, so devices that are offline at startup are picked up when they appear
 - Stall detection: a device session with no successful read for `poller.stall_timeout_ms` (default max(10 × poll interval, 30 s)) is restarted
 - Subnet mode rescans every `discovery.rescan_interval_s` (default 600) and starts pollers for new hosts; with no devices the collector stays up
@@ -27,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `CONTRIBUTING.md`
 
 ### Fixed
+- Uplink throughput was capped at `batch_size / drain_interval` (200 samples/s by default) because it paused between every batch; it now drains back to back while a backlog remains
 - Gateways: devices are keyed by host and unit ID, so every unit behind one IP is polled (previously only the last one)
 - Model discovery walks the model chain header by header instead of reading a fixed 200-register window, so models beyond register 200 (e.g. status, controls, MPPT) are no longer dropped; the standard bases 40000, 0 and 50000 are probed after the configured one
 - `sunspec.base_address = 0` is accepted; 0 is a valid SunSpec base address
@@ -43,6 +46,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed unused `retry_count` column from buffer schema
 
 ### Changed
+- Samples are written to SQLite in transactions of up to 256 rows (one fsync per batch instead of per sample), reducing flash wear
+- Delivery is documented as at-least-once: rows are deleted only after Kafka acknowledges them, so a crash between publish and delete can produce duplicates
 - `sunspec.discovery_register_count` / `SUNSPEC_DISCOVERY_REG_COUNT` are deprecated and ignored (a warning is logged)
 - `poller.jitter_ms` now offsets each device's fixed polling schedule instead of stretching every interval
 - Orchestration moved from `main.rs` into `collector_app::run` and library modules so it can be tested end to end

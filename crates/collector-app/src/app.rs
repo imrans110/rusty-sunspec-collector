@@ -10,11 +10,12 @@ use avro_kafka::{KafkaConfig, Publisher};
 use buffer::BufferStore;
 
 use crate::config::CollectorConfig;
-use crate::{devices, ingest, metrics_server, systemd, uplink};
+use crate::uplink::UplinkConfig;
+use crate::{devices, ingest, metrics_server, retention, systemd, uplink};
 
 /// Runs the collector until `shutdown` resolves, then stops every task in order:
 /// device pollers first, then ingest (which drains the channel into the buffer),
-/// then the uplink.
+/// then the uplink (after a bounded final drain to Kafka).
 pub async fn run(
     config: CollectorConfig,
     metrics: Option<PrometheusHandle>,
@@ -40,12 +41,23 @@ pub async fn run(
         buffer.clone(),
         publisher.topic().to_string(),
     ));
+    // The uplink stops only after ingest has persisted everything, then drains once more.
+    let (uplink_stop_tx, uplink_stop_rx) = watch::channel(false);
     let uplink = tokio::spawn(uplink::run(
-        buffer,
+        buffer.clone(),
         publisher,
+        uplink_stop_rx,
+        UplinkConfig {
+            batch_size: config.buffer_batch_size,
+            drain_interval: Duration::from_millis(config.buffer_drain_interval_ms),
+            shutdown_drain_timeout: Duration::from_millis(config.shutdown_drain_timeout_ms),
+        },
+    ));
+    let retention = tokio::spawn(retention::run(
+        buffer,
+        config.buffer_max_rows,
+        Duration::from_secs(config.buffer_max_age_s),
         shutdown_rx.clone(),
-        config.buffer_batch_size,
-        Duration::from_millis(config.buffer_drain_interval_ms),
     ));
     let devices = tokio::spawn(devices::run(config, tx, shutdown_rx.clone()));
 
@@ -60,7 +72,9 @@ pub async fn run(
     // ingest finishes after persisting everything still queued.
     let _ = devices.await;
     let _ = ingest.await;
+    let _ = uplink_stop_tx.send(true);
     let _ = uplink.await;
+    let _ = retention.await;
     if let Some(handle) = watchdog {
         let _ = handle.await;
     }
