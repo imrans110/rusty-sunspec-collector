@@ -29,5 +29,9 @@ types = { path = "../types" }
 [target.'cfg(target_os = "linux")'.dependencies]
 sd-notify = "0.4"
 
+[features]
+# Statically link a vendored OpenSSL (portable ARM binaries; see docs/build.md).
+vendored-openssl = ["avro-kafka/vendored-openssl"]
+
 [dev-dependencies]
 sunspec-sim = { path = "../sunspec-sim" }

@@ -1,24 +1,42 @@
 [Unit]
 Description=Rusty SunSpec Collector
-After=network.target
+Documentation=https://imrans110.github.io/rusty-sunspec-collector/
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=notify
 ExecStart=/usr/local/bin/collector-app
+EnvironmentFile=-/etc/sunspec-collector.env
 Restart=always
 RestartSec=5
-WatchdogSec=10
+# Pinged only while ingest and the uplink are healthy, so a stuck pipeline is restarted.
+WatchdogSec=30
+# SIGTERM triggers a graceful stop: pollers stop, queued samples are persisted, and the
+# uplink drains for up to buffer.shutdown_drain_timeout_ms (default 5 s).
+TimeoutStopSec=30
 LimitNOFILE=4096
-EnvironmentFile=-/etc/sunspec-collector.env
+
+# Run as an unprivileged, per-service user; systemd creates and owns
+# /var/lib/sunspec-collector for the SQLite buffer.
+DynamicUser=yes
+StateDirectory=sunspec-collector
+StateDirectoryMode=0750
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/sunspec-collector
 PrivateTmp=true
+PrivateDevices=true
 ProtectKernelTunables=true
+ProtectKernelModules=true
 ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

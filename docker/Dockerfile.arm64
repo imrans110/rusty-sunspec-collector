@@ -1,14 +1,21 @@
+# Cross-compilation image for aarch64 (see Cross.toml and docs/build.md).
+# librdkafka is built from source by rdkafka's cmake-build feature. Build with
+# `--features vendored-openssl`: OpenSSL is then compiled from source and linked
+# statically (the image's arm64 OpenSSL is too old for librdkafka 2.12), which also
+# keeps the binary independent of the target distribution's OpenSSL. Only the curl
+# headers librdkafka 2.12 needs at compile time are installed for the target;
+# SQLite is bundled by sqlx and zstd by zstd-sys.
 FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu:latest
 
-RUN dpkg --add-architecture arm64
-RUN apt-get update
-
-RUN apt-get install -y --no-install-recommends \
-    libssl-dev:arm64 \
-    libcurl4-openssl-dev:arm64 \
-    libsqlite3-dev:arm64 \
-    librdkafka-dev:arm64 \
-    pkg-config
+RUN dpkg --add-architecture arm64 \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        cmake \
+        make \
+        perl \
+        pkg-config \
+        libcurl4-openssl-dev:arm64 \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig
 ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
