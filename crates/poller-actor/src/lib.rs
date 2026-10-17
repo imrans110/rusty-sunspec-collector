@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use metrics::{counter, gauge, histogram};
@@ -125,7 +125,22 @@ pub enum PollerError {
     ChannelClosed,
 }
 
-/// Lock-free view of one device's state, shared with metrics and health reporting.
+/// What a device's latest session discovered, and its latest reading of each polled
+/// model: the live view behind `/devices`. Holds one sample per model at most.
+#[derive(Debug, Clone, Default)]
+pub struct DeviceSnapshot {
+    /// Address of the `SunS` marker, once a session has found it.
+    pub base_address: Option<u16>,
+    /// The model chain, in device order.
+    pub models: Vec<u16>,
+    /// The models the polling profile selects, in device order.
+    pub polled_models: Vec<u16>,
+    /// Latest successful read of each polled model.
+    pub readings: BTreeMap<u16, Sample>,
+}
+
+/// One device's state, shared with metrics, health reporting and `/devices`. The
+/// counters are lock-free; the snapshot takes a short lock once per read.
 #[derive(Debug, Default)]
 pub struct DeviceHealth {
     up: AtomicBool,
@@ -133,6 +148,7 @@ pub struct DeviceHealth {
     /// Last successful read or poll cycle with nothing due; drives stall detection.
     last_progress_ms: AtomicU64,
     restarts: AtomicU64,
+    snapshot: Mutex<DeviceSnapshot>,
 }
 
 impl DeviceHealth {
@@ -147,6 +163,33 @@ impl DeviceHealth {
 
     pub fn restarts(&self) -> u64 {
         self.restarts.load(Ordering::Relaxed)
+    }
+
+    /// A copy of the latest discovery and readings.
+    pub fn snapshot(&self) -> DeviceSnapshot {
+        self.snapshot
+            .lock()
+            .expect("snapshot lock poisoned")
+            .clone()
+    }
+
+    fn record_discovery(&self, base_address: u16, models: Vec<u16>, polled_models: Vec<u16>) {
+        let mut snapshot = self.snapshot.lock().expect("snapshot lock poisoned");
+        // A firmware update can change the chain; forget models no longer polled.
+        snapshot
+            .readings
+            .retain(|model_id, _| polled_models.contains(model_id));
+        snapshot.base_address = Some(base_address);
+        snapshot.models = models;
+        snapshot.polled_models = polled_models;
+    }
+
+    fn record_reading(&self, sample: &Sample) {
+        self.snapshot
+            .lock()
+            .expect("snapshot lock poisoned")
+            .readings
+            .insert(sample.model_id, sample.clone());
     }
 
     fn record_success(&self, device: &str) {
@@ -385,6 +428,11 @@ async fn poll_device(
     if discovered.is_empty() {
         return PollerError::MalformedChain("no models before the end marker");
     }
+    health.record_discovery(
+        base,
+        discovered.clone(),
+        models.iter().map(|model| model.id).collect(),
+    );
     if models.is_empty() {
         return PollerError::NothingToPoll(discovered);
     }
@@ -433,6 +481,7 @@ async fn poll_device(
                         collected_at_ms: unix_ms(),
                         points,
                     };
+                    health.record_reading(&sample);
                     // Never block polling for long on a full channel; drop and count.
                     match sender
                         .send_timeout(sample, config.actor.poll_interval)

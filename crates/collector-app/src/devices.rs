@@ -58,7 +58,7 @@ pub async fn run(
             info!(device = %identity.key(), "starting device poller");
             let health = Arc::new(DeviceHealth::default());
             known.insert(identity.clone(), health.clone());
-            health_registry.register_device(identity.key(), health.clone());
+            health_registry.register_device(&identity, health.clone());
             let device = with_shared_converter(config.device_config(identity), &mut converters);
             tasks.spawn(run_device(device, sender.clone(), shutdown.clone(), health));
         }

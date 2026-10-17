@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{routing::get, Json, Router};
@@ -10,6 +11,7 @@ use tokio::sync::watch;
 use tracing::{info, warn};
 
 use crate::health::Health;
+use types::DeviceIdentity;
 
 /// Bucket bounds (seconds) for every `*_seconds` histogram.
 const LATENCY_BUCKETS: &[f64] = &[
@@ -38,7 +40,7 @@ fn describe_metrics() {
     describe_histogram!(
         "sunspec_poll_duration_seconds",
         Unit::Seconds,
-        "Time to read every model of a device once."
+        "Time to read the models due in one poll cycle of a device."
     );
     describe_gauge!(
         "sunspec_device_up",
@@ -97,14 +99,44 @@ pub async fn bind(port: u16) -> std::io::Result<tokio::net::TcpListener> {
     tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await
 }
 
-/// Serves `/healthz` and, when a recorder is installed, `/metrics` until shutdown.
+/// Serves `/healthz`, `/devices` and, when a recorder is installed, `/metrics` until
+/// shutdown.
 pub async fn serve(
     listener: tokio::net::TcpListener,
     handle: Option<PrometheusHandle>,
     health: Arc<Health>,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let mut app = Router::new().route(
+    let devices = health.clone();
+    let device = health.clone();
+    let mut app = Router::new()
+        .route(
+            "/devices",
+            get(move || {
+                let devices = devices.devices();
+                async move { Json(serde_json::json!({ "devices": devices })) }
+            }),
+        )
+        .route(
+            "/devices/{host}/{unit}",
+            get(move |Path((host, unit_id)): Path<(String, u8)>| {
+                let identity = DeviceIdentity { ip: host, unit_id };
+                let view = device.device(&identity);
+                async move {
+                    match view {
+                        Some(view) => Json(view).into_response(),
+                        None => (
+                            StatusCode::NOT_FOUND,
+                            Json(serde_json::json!({
+                                "error": format!("unknown device {}", identity.key())
+                            })),
+                        )
+                            .into_response(),
+                    }
+                }
+            }),
+        );
+    app = app.route(
         "/healthz",
         get(move || {
             let report = health.report();
@@ -123,7 +155,7 @@ pub async fn serve(
     }
 
     if let Ok(addr) = listener.local_addr() {
-        info!(%addr, "serving /metrics and /healthz");
+        info!(%addr, "serving /metrics, /healthz and /devices");
     }
 
     if let Err(err) = axum::serve(listener, app)

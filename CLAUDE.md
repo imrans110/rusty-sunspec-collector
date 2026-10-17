@@ -120,6 +120,9 @@ the owner's approval).
   zero intervals and ports, `modbus.max_batch_size` above 125, and `kafka.acks` 0/1 while
   idempotence is on. An unbindable metrics port stops startup (`bind metrics port <port>`). New
   settings need validation and docs.
+- **Live readings**: `DeviceHealth::snapshot()` holds the latest discovery and one `Sample` per
+  polled model; `Health::devices()` serves them as `/devices` and `/devices/{host}/{unit}` on the
+  metrics port (`health.rs`, `metrics_server.rs`).
 - **Health**: `/healthz` is 200 while ingest and uplink heartbeats are under 120 s old; device
   outages do not affect it. The systemd watchdog is pinged only while healthy.
   `sunspec_device_up` is set to 0 when a device's poller starts, so never-reachable devices show 0.

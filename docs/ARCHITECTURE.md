@@ -51,7 +51,7 @@ Delivery is at-least-once: a buffered sample is deleted only after Kafka has ack
  |    Kafka    | <------------------------------------------- |  uplink   |
  +-------------+   delete only the rows Kafka acknowledged    +-----------+
 
- HTTP on metrics.port: /metrics (Prometheus) and /healthz; systemd watchdog on Linux.
+ HTTP on metrics.port: /metrics (Prometheus), /healthz and /devices; systemd watchdog on Linux.
 ```
 
 ---
@@ -110,7 +110,7 @@ sunspec-sim -- sunspec-parser
 only logs) and calls `run_with_publisher`, which:
 
 1. creates the shutdown `watch` channel and the shared `Health` state;
-2. binds `metrics.port` and starts the HTTP server for `/metrics` and `/healthz`; if the port
+2. binds `metrics.port` and starts the HTTP server for `/metrics`, `/healthz` and `/devices`; if the port
    cannot be bound, startup fails with an error containing `bind metrics port <port>`;
 3. opens the SQLite buffer (failure ends the process);
 4. creates the bounded sample channel (`runtime.channel_capacity`, default 256);
@@ -557,6 +557,14 @@ read successfully. Device outages do not make the collector unhealthy: restartin
 would not bring a device back, and they are visible in the per-device metrics. The Docker
 `HEALTHCHECK` uses this endpoint.
 
+### `/devices`
+
+Each device's `DeviceHealth` also holds a `DeviceSnapshot`: the base address and model chain from
+the latest discovery, the polled models, and the latest `Sample` of each polled model (replaced on
+every successful read, and pruned when a rediscovery drops a model). `GET /devices` and
+`GET /devices/{host}/{unit}` serialise these from the health registry; points keep definition
+order (`types::ordered_points`). Memory is bounded by one sample per device and model.
+
 ### systemd watchdog
 
 On Linux, when systemd sets `WATCHDOG_USEC` (the unit uses `Type=notify` and `WatchdogSec=30`), a
@@ -628,7 +636,7 @@ The binary runs on Tokio's multi-threaded runtime. Every long-lived component is
 | Ingest | 1 | Until the sample channel closes |
 | Uplink | 1 | Until its stop signal, plus the final drain |
 | Retention | 1 | Until shutdown |
-| HTTP server (`/metrics`, `/healthz`) | 1 | Until shutdown |
+| HTTP server (`/metrics`, `/healthz`, `/devices`) | 1 | Until shutdown |
 | systemd watchdog | 0 or 1 (Linux, when enabled) | Until shutdown |
 
 Coordination:
