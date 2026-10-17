@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-17
+
 ### Upgrade notes
 - Kafka consumers must switch to the v2 record format (one Avro single-object record per sample, keyed by device); see `crates/avro-kafka/schemas/sunspec_sample.avsc` and `docs/ops.md`. Rows buffered by an older version are published with empty `points`, so let the old version drain its buffer before upgrading if possible.
 - Docker: the default buffer file is now `/app/data/sunspec-buffer.sqlite` (previously `/app/data/buffer.sqlite` via the image's `SUNSPEC_BUFFER_PATH`). To keep using an existing volume's unsent rows, set `SUNSPEC_BUFFER_PATH=/app/data/buffer.sqlite` (or `buffer.path`).
