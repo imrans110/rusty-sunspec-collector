@@ -120,7 +120,9 @@ Releases are published by pushing a `v*` tag; the steps (version bump, CHANGELOG
 - **No `#![allow(dead_code)]`**: Address warnings before merging.
 - **Keep `types` lightweight**: Only `serde` as a dependency.
 - **Formatting**: `rustfmt.toml` enforces max width 100 and auto-reordered imports.
-- **MSRV**: 1.88 (`rust-version` in the workspace `Cargo.toml`).
+- **MSRV**: 1.88 (`rust-version` in the workspace `Cargo.toml`; new crates add
+  `rust-version.workspace = true`). The workspace uses resolver 3, so `cargo update` picks
+  dependency versions that still build on 1.88.
 
 ## What to Work On
 

@@ -2,6 +2,7 @@
 name = "sunspec-sim"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "SunSpec Modbus TCP device simulator for tests and local development"

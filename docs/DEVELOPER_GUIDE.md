@@ -420,7 +420,11 @@ Workflow hygiene, which Scorecard checks:
   images, releases or Pages) asks for it in its own `permissions`.
 
 The CI jobs use the latest stable Rust; the Docker images are built with Rust 1.88, so the Docker
-E2E job is the one that exercises the MSRV.
+E2E job is the one that exercises the MSRV. Every crate inherits `rust-version` from the workspace,
+and the workspace uses resolver 3, so `cargo update` and Dependabot prefer dependency versions that
+support 1.88 (a crate whose newer releases need a newer Rust stays at its last compatible
+version). To check a lockfile change locally: `rustup toolchain install 1.88` and
+`cargo +1.88 check --locked --workspace --all-targets`.
 
 ### Before pushing
 
@@ -510,9 +514,9 @@ cargo new --lib crates/my-new-crate
 ```
 
 Make sure it is listed in `[workspace] members` in the root `Cargo.toml`, inherit `edition`,
-`license` and `repository` from `[workspace.package]` (`edition.workspace = true`, ...), use
-workspace dependencies where they exist, define a `thiserror` error type, and make sure
-`cargo clippy` and `cargo fmt` pass.
+`rust-version`, `license` and `repository` from `[workspace.package]`
+(`edition.workspace = true`, ...), use workspace dependencies where they exist, define a
+`thiserror` error type, and make sure `cargo clippy` and `cargo fmt` pass.
 
 ---
 
