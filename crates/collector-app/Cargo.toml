@@ -28,3 +28,6 @@ types = { path = "../types" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 sd-notify = "0.4"
+
+[dev-dependencies]
+sunspec-sim = { path = "../sunspec-sim" }

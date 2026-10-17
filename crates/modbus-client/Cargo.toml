@@ -16,3 +16,7 @@ serde = { workspace = true, features = ["derive"], optional = true }
 [features]
 default = []
 config = ["serde"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+sunspec-sim = { path = "../sunspec-sim" }

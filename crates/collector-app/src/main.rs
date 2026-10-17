@@ -31,6 +31,9 @@ const MAX_RESPAWN_DELAY_MS: u64 = 60_000;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
+    // Install signal handlers first so a stop during discovery is still graceful.
+    let mut shutdown_signal = tokio::spawn(shutdown_signal());
+
     let config_path = parse_config_arg();
     let config = CollectorConfig::load_with_path(config_path).context("load config failed")?;
     config.validate().context("config validation failed")?;
@@ -112,8 +115,6 @@ async fn main() -> Result<()> {
     notify_ready();
     let watchdog_handle = start_watchdog(shutdown_rx.clone());
 
-    let shutdown_signal = tokio::signal::ctrl_c();
-    tokio::pin!(shutdown_signal);
     loop {
         tokio::select! {
             _ = &mut shutdown_signal => {
@@ -499,6 +500,25 @@ fn respawn_delay(base_ms: u64, failure_count: u32) -> Duration {
     let candidate = base_ms.saturating_mul(factor);
     let capped = candidate.min(MAX_RESPAWN_DELAY_MS);
     Duration::from_millis(capped.max(base_ms))
+}
+
+/// Resolves on SIGINT (Ctrl-C) or SIGTERM, which systemd and Docker send on stop.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = terminate.recv() => {}
+                }
+                return;
+            }
+            Err(err) => warn!(error = %err, "failed to install SIGTERM handler"),
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 fn parse_config_arg() -> Option<String> {

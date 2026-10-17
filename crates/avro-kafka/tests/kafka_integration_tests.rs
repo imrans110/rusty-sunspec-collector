@@ -18,11 +18,10 @@ struct Device {
 }
 
 #[tokio::test]
+#[ignore = "needs a Kafka broker: SUNSPEC_KAFKA_BROKERS=host:port cargo test -- --ignored"]
 async fn kafka_publish_integration() {
-    let brokers = match std::env::var("SUNSPEC_KAFKA_BROKERS") {
-        Ok(value) => value,
-        Err(_) => return,
-    };
+    let brokers = std::env::var("SUNSPEC_KAFKA_BROKERS")
+        .expect("SUNSPEC_KAFKA_BROKERS must point at a Kafka broker");
     let topic =
         std::env::var("SUNSPEC_KAFKA_TOPIC").unwrap_or_else(|_| "sunspec.telemetry".to_string());
 
