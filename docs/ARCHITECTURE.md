@@ -256,6 +256,9 @@ unmodified). They are embedded with `include_str!` (the `MODEL_SOURCES` list in
 | 120-124 | Nameplate, basic settings, status, controls, basic storage |
 | 160 | Multiple MPPT (repeating modules) |
 | 201-204 | AC meters |
+| 701-704 | IEEE 1547-2018 DER: AC measurements, capacity, enter service, AC controls |
+| 705-712 | IEEE 1547-2018 DER functions: volt-var, volt-watt, voltage and frequency trip curves, frequency droop, watt-var |
+| 713 | DER storage capacity (state of charge, energy available) |
 | 802 | Battery |
 
 `model_name(id)` returns the definition's name (for example `inverter_three_phase` for 103), or
@@ -273,9 +276,13 @@ the points in definition order.
   - `count` 1: a fixed sub-group, named `group.Point`;
   - `count` n > 1: n repetitions, named `group[i].Point`;
   - `count` 0: repeated to fill the rest of the model;
-  - `count` naming a point: repeated as many times as that point's value.
+  - `count` naming a point: repeated as many times as that point's value. The point may belong
+    to an enclosing group, and `0xFFFF` (not implemented) means no repetitions.
 
-  For example, model 160 publishes `module[0].DCA`, `module[1].DCA` and so on.
+  For example, model 160 publishes `module[0].DCA`, `module[1].DCA` and so on. The IEEE 1547
+  curve models nest repeating groups sized by top-level points: model 705 (volt-var) has `NCrv`
+  curves of `NPt` points each, published as `Crv[1].Pt[2].V`, and the trip models (707-710) add a
+  fixed level in between, e.g. `Crv[0].MayTrip.Pt[1].V`.
 - **Omitted.** The top-level `ID` and `L` header points, `sunssf` (scale factor) points and `pad`
   points are not published.
 - **Truncated input.** If the registers end early, the points that are present are decoded and the

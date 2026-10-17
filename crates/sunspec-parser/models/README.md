@@ -17,4 +17,7 @@ this directory and add it to `MODEL_SOURCES` in `src/registry.rs`.
 | 120–124 | Nameplate, basic settings, status, controls, basic storage |
 | 160 | Multiple MPPT (repeating modules) |
 | 201–204 | AC meters |
+| 701–704 | IEEE 1547-2018 DER: AC measurements, capacity, enter service, AC controls |
+| 705–712 | IEEE 1547-2018 DER functions: volt-var, volt-watt, trip curves, frequency droop, watt-var |
+| 713 | DER storage capacity |
 | 802 | Battery |
