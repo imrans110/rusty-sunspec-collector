@@ -99,7 +99,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "avro-kafka"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "apache-avro",
  "rdkafka",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "buffer"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "sqlx",
  "thiserror 1.0.69",
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "collector-app"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "avro-kafka",
@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "discovery"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -1154,7 +1154,7 @@ dependencies = [
 
 [[package]]
 name = "modbus-client"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "sunspec-sim",
@@ -1366,7 +1366,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "poller-actor"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "metrics",
  "modbus-client",
@@ -1951,7 +1951,7 @@ dependencies = [
 
 [[package]]
 name = "sunspec-parser"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1960,7 +1960,7 @@ dependencies = [
 
 [[package]]
 name = "sunspec-sim"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde_json",
  "sunspec-parser",
@@ -2347,7 +2347,7 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "types"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
 ]
