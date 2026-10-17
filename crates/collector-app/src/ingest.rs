@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use metrics::counter;
@@ -8,20 +9,34 @@ use tracing::{info, warn};
 use buffer::BufferStore;
 use poller_actor::Sample;
 
+use crate::health::Health;
+
 /// Most samples written in one transaction.
 const MAX_BATCH: usize = 256;
 /// How long to wait for more samples before committing a partial batch.
 const COALESCE_WINDOW: Duration = Duration::from_millis(100);
+/// Heartbeat interval while no samples arrive.
+const IDLE_HEARTBEAT: Duration = Duration::from_secs(5);
 
 /// Persists samples from the pollers into the buffer, grouping samples that arrive
 /// close together into one transaction. Runs until every sender is dropped, so
 /// samples still queued at shutdown are written before it returns.
-pub async fn run(mut rx: mpsc::Receiver<Sample>, buffer: BufferStore, topic: String) {
+pub async fn run(
+    mut rx: mpsc::Receiver<Sample>,
+    buffer: BufferStore,
+    topic: String,
+    health: Arc<Health>,
+) {
     let mut batch = Vec::with_capacity(MAX_BATCH);
     let mut closed = false;
 
     while !closed {
-        if rx.recv_many(&mut batch, MAX_BATCH).await == 0 {
+        health.ingest.beat();
+        let received = tokio::select! {
+            received = rx.recv_many(&mut batch, MAX_BATCH) => received,
+            _ = sleep(IDLE_HEARTBEAT) => continue,
+        };
+        if received == 0 {
             break;
         }
         let window = sleep(COALESCE_WINDOW);
@@ -57,7 +72,7 @@ async fn persist(buffer: &BufferStore, topic: &str, batch: &mut Vec<Sample>) {
         })
         .collect();
     match buffer.enqueue_batch(topic, &payloads).await {
-        Ok(()) => counter!("buffer_enqueue_success").increment(payloads.len() as u64),
+        Ok(()) => counter!("sunspec_buffer_writes_total").increment(payloads.len() as u64),
         Err(err) => {
             warn!(error = %err, rows = payloads.len(), "buffer write failed; samples dropped");
             counter!("sunspec_buffer_dropped_total", "reason" => "write_error")
@@ -104,7 +119,13 @@ mod tests {
         // Shutdown: the pollers' senders are dropped while samples are still queued.
         drop(tx);
 
-        run(rx, buffer.clone(), "topic".to_string()).await;
+        run(
+            rx,
+            buffer.clone(),
+            "topic".to_string(),
+            Arc::new(Health::default()),
+        )
+        .await;
 
         let rows = buffer.dequeue_batch(10_000).await.unwrap();
         assert_eq!(rows.len(), 600);

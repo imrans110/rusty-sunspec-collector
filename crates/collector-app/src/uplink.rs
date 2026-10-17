@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use metrics::{counter, histogram};
@@ -8,6 +9,8 @@ use tracing::{debug, info, warn};
 use avro_kafka::{PublishError, Publisher};
 use buffer::BufferStore;
 use poller_actor::Sample;
+
+use crate::health::Health;
 
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
@@ -29,11 +32,13 @@ pub async fn run(
     publisher: Publisher,
     mut stop: watch::Receiver<bool>,
     config: UplinkConfig,
+    health: Arc<Health>,
 ) {
     let mut failures = 0u32;
     let mut backlog = false;
 
     loop {
+        health.uplink.beat();
         let delay = next_delay(failures, backlog, config.drain_interval);
         tokio::select! {
             _ = sleep(delay) => {}
@@ -142,15 +147,15 @@ async fn drain_once(
         }
     }
     if !acked.is_empty() {
-        histogram!("uplink_publish_latency").record(started.elapsed());
-        counter!("uplink_messages_sent").increment(acked.len() as u64);
+        histogram!("sunspec_uplink_publish_seconds").record(started.elapsed());
+        counter!("sunspec_uplink_records_total").increment(acked.len() as u64);
         // Delete only what Kafka acknowledged (at-least-once delivery).
         if let Err(err) = buffer.delete_batch(&acked).await {
             warn!(error = %err, "deleting published rows failed; they may be sent again");
         }
     }
     if let Some(err) = last_error {
-        counter!("uplink_publish_error").increment(undelivered as u64);
+        counter!("sunspec_uplink_errors_total").increment(undelivered as u64);
         warn!(undelivered, error = %err, "records not delivered; they stay buffered");
         if acked.is_empty() {
             return Err(());

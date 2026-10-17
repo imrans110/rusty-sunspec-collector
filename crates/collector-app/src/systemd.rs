@@ -3,7 +3,11 @@ use std::env;
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 
+use std::sync::Arc;
+
 use tokio::sync::watch;
+
+use crate::health::Health;
 #[cfg(target_os = "linux")]
 use tokio::time::sleep;
 #[cfg(target_os = "linux")]
@@ -19,13 +23,22 @@ pub fn notify_ready() {
 #[cfg(not(target_os = "linux"))]
 pub fn notify_ready() {}
 
+/// Pings the systemd watchdog only while the pipeline is healthy, so systemd restarts
+/// the service if ingest or the uplink gets stuck.
 #[cfg(target_os = "linux")]
-pub fn start_watchdog(mut shutdown: watch::Receiver<bool>) -> Option<tokio::task::JoinHandle<()>> {
+pub fn start_watchdog(
+    health: Arc<Health>,
+    mut shutdown: watch::Receiver<bool>,
+) -> Option<tokio::task::JoinHandle<()>> {
     let interval = watchdog_interval()?;
     Some(tokio::spawn(async move {
         loop {
             tokio::select! {
                 _ = sleep(interval) => {
+                    if !health.report().healthy {
+                        warn!("pipeline unhealthy; withholding systemd watchdog ping");
+                        continue;
+                    }
                     if let Err(err) = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]) {
                         warn!(error = %err, "systemd watchdog notify failed");
                     }
@@ -41,7 +54,10 @@ pub fn start_watchdog(mut shutdown: watch::Receiver<bool>) -> Option<tokio::task
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn start_watchdog(_shutdown: watch::Receiver<bool>) -> Option<tokio::task::JoinHandle<()>> {
+pub fn start_watchdog(
+    _health: Arc<Health>,
+    _shutdown: watch::Receiver<bool>,
+) -> Option<tokio::task::JoinHandle<()>> {
     None
 }
 

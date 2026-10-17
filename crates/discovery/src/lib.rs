@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use types::DeviceIdentity;
 
@@ -114,7 +114,7 @@ pub async fn discover_subnet(
                     None
                 }
                 Err(_) => {
-                    warn!(%addr, "connection timed out");
+                    debug!(%addr, "connection timed out");
                     None
                 }
             }

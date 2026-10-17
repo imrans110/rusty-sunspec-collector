@@ -1,8 +1,9 @@
 pub mod app;
 pub mod config;
 mod devices;
+pub mod health;
 mod ingest;
-mod metrics_server;
+pub mod metrics_server;
 mod retention;
 mod systemd;
 mod uplink;
