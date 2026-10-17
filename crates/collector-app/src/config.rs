@@ -211,25 +211,26 @@ fn apply_env_overrides(config: &mut CollectorConfig) {
         config.buffer_drain_interval_ms = value;
     }
 
-    config.base_address =
-        parse_env_u16("SUNSPEC_BASE_ADDRESS").unwrap_or(config.base_address);
-    config.discovery_register_count = parse_env_u16("SUNSPEC_DISCOVERY_REG_COUNT")
-        .unwrap_or(config.discovery_register_count);
+    config.base_address = parse_env_u16("SUNSPEC_BASE_ADDRESS").unwrap_or(config.base_address);
+    config.discovery_register_count =
+        parse_env_u16("SUNSPEC_DISCOVERY_REG_COUNT").unwrap_or(config.discovery_register_count);
     config.channel_capacity =
         parse_env_usize("SUNSPEC_CHANNEL_CAPACITY").unwrap_or(config.channel_capacity);
     config.respawn_delay_ms =
         parse_env_u64("SUNSPEC_RESPAWN_DELAY_MS").unwrap_or(config.respawn_delay_ms);
 
-    config.kafka_brokers = env::var("SUNSPEC_KAFKA_BROKERS").ok().or(config.kafka_brokers);
-    config.kafka_client_id =
-        env::var("SUNSPEC_KAFKA_CLIENT_ID").ok().or(config.kafka_client_id);
+    config.kafka_brokers = env::var("SUNSPEC_KAFKA_BROKERS")
+        .ok()
+        .or(config.kafka_brokers);
+    config.kafka_client_id = env::var("SUNSPEC_KAFKA_CLIENT_ID")
+        .ok()
+        .or(config.kafka_client_id);
     config.kafka_acks = env::var("SUNSPEC_KAFKA_ACKS").ok().or(config.kafka_acks);
-    config.kafka_compression =
-        env::var("SUNSPEC_KAFKA_COMPRESSION").ok().or(config.kafka_compression);
-    config.kafka_timeout_ms =
-        parse_env_u64("SUNSPEC_KAFKA_TIMEOUT_MS").or(config.kafka_timeout_ms);
-    config.kafka_topic =
-        env::var("SUNSPEC_KAFKA_TOPIC").ok().or(config.kafka_topic);
+    config.kafka_compression = env::var("SUNSPEC_KAFKA_COMPRESSION")
+        .ok()
+        .or(config.kafka_compression);
+    config.kafka_timeout_ms = parse_env_u64("SUNSPEC_KAFKA_TIMEOUT_MS").or(config.kafka_timeout_ms);
+    config.kafka_topic = env::var("SUNSPEC_KAFKA_TOPIC").ok().or(config.kafka_topic);
     config.kafka_enable_idempotence =
         parse_env_bool("SUNSPEC_KAFKA_IDEMPOTENCE").or(config.kafka_enable_idempotence);
 
@@ -315,9 +316,10 @@ fn load_file_config(config_path: Option<&str>) -> Result<Option<FileConfig>> {
         },
     };
 
-    let content = fs::read_to_string(&path)
-        .with_context(|| format!("read config file {path}"))?;
-    let ext = Path::new(&path).extension().and_then(|value| value.to_str());
+    let content = fs::read_to_string(&path).with_context(|| format!("read config file {path}"))?;
+    let ext = Path::new(&path)
+        .extension()
+        .and_then(|value| value.to_str());
 
     let config = match ext {
         Some("json") => serde_json::from_str(&content).context("parse json config")?,

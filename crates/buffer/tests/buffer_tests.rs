@@ -6,7 +6,9 @@ use buffer::BufferStore;
 #[tokio::test]
 async fn buffer_enqueue_dequeue_delete() {
     let path = temp_db_path("buffer_enqueue_dequeue_delete");
-    let store = BufferStore::new(path.to_str().expect("path")).await.expect("init");
+    let store = BufferStore::new(path.to_str().expect("path"))
+        .await
+        .expect("init");
 
     store.enqueue("topic-a", b"alpha").await.expect("enqueue");
     store.enqueue("topic-b", b"beta").await.expect("enqueue");
@@ -33,7 +35,9 @@ async fn buffer_enqueue_dequeue_delete() {
 #[tokio::test]
 async fn buffer_delete_empty_is_noop() {
     let path = temp_db_path("buffer_delete_empty_is_noop");
-    let store = BufferStore::new(path.to_str().expect("path")).await.expect("init");
+    let store = BufferStore::new(path.to_str().expect("path"))
+        .await
+        .expect("init");
 
     let count = store.pending_count().await.expect("count");
     assert_eq!(count, 0);

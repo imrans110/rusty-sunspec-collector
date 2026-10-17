@@ -19,7 +19,7 @@ use buffer::BufferStore;
 use collector_app::CollectorConfig;
 use discovery::discover;
 use modbus_client::{ClientConfig, ModbusClient};
-use poller_actor::{ActorConfig, PollerActor, PollerError, PollSample};
+use poller_actor::{ActorConfig, PollSample, PollerActor, PollerError};
 use sunspec_parser::{parse_models_from_registers_lenient, ModelDefinition};
 use types::DeviceIdentity;
 
@@ -40,7 +40,11 @@ async fn main() -> Result<()> {
     let handle = builder
         .install_recorder()
         .context("failed to install metrics recorder")?;
-    let _metrics_handle = tokio::spawn(metrics_task(handle, shutdown_rx.clone(), config.metrics_port));
+    let _metrics_handle = tokio::spawn(metrics_task(
+        handle,
+        shutdown_rx.clone(),
+        config.metrics_port,
+    ));
 
     let devices = discover(config.discovery.clone())
         .await
@@ -57,7 +61,10 @@ async fn main() -> Result<()> {
             .kafka_client_id
             .clone()
             .unwrap_or_else(|| "sunspec-collector".to_string());
-        kafka_config.acks = config.kafka_acks.clone().unwrap_or_else(|| "all".to_string());
+        kafka_config.acks = config
+            .kafka_acks
+            .clone()
+            .unwrap_or_else(|| "all".to_string());
         kafka_config.compression = config
             .kafka_compression
             .clone()
@@ -69,7 +76,10 @@ async fn main() -> Result<()> {
 
         Publisher::new_kafka(
             Publisher::default_schema(),
-            config.kafka_topic.clone().unwrap_or_else(|| "sunspec.telemetry".to_string()),
+            config
+                .kafka_topic
+                .clone()
+                .unwrap_or_else(|| "sunspec.telemetry".to_string()),
             kafka_config,
         )
         .context("kafka publisher init failed")?
@@ -304,7 +314,7 @@ async fn uplink_task(
     let mut failure_count: u32 = 0;
     let mut total_sent: u64 = 0;
     let mut total_failed: u64 = 0;
-    
+
     loop {
         let delay = uplink_delay(
             drain_interval,
@@ -513,9 +523,7 @@ fn notify_ready() {
 fn notify_ready() {}
 
 #[cfg(target_os = "linux")]
-fn start_watchdog(
-    mut shutdown: watch::Receiver<bool>,
-) -> Option<tokio::task::JoinHandle<()>> {
+fn start_watchdog(mut shutdown: watch::Receiver<bool>) -> Option<tokio::task::JoinHandle<()>> {
     let interval = watchdog_interval()?;
     Some(tokio::spawn(async move {
         loop {

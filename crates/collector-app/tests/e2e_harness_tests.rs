@@ -39,10 +39,7 @@ async fn e2e_harness_serializes_and_buffers() {
         .publish_bytes(&batch[0].topic, &batch[0].payload)
         .await
         .expect("publish bytes");
-    buffer
-        .delete_batch(&[batch[0].id])
-        .await
-        .expect("delete");
+    buffer.delete_batch(&[batch[0].id]).await.expect("delete");
 
     let remaining = buffer.dequeue_batch(10).await.expect("dequeue");
     assert!(remaining.is_empty());

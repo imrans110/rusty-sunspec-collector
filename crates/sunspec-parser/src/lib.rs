@@ -134,21 +134,18 @@ pub fn parse_models_from_xml(data: &str) -> Result<Vec<ModelDefinition>, ParserE
 
                     match key {
                         b"id" => {
-                            id = Some(
-                                value
-                                    .parse::<u16>()
-                                    .map_err(|_| ParserError::InvalidAttribute("id".to_string()))?,
-                            );
+                            id =
+                                Some(value.parse::<u16>().map_err(|_| {
+                                    ParserError::InvalidAttribute("id".to_string())
+                                })?);
                         }
                         b"name" => {
                             name = Some(value);
                         }
                         b"len" | b"length" => {
-                            length = Some(
-                                value
-                                    .parse::<u16>()
-                                    .map_err(|_| ParserError::InvalidAttribute("length".to_string()))?,
-                            );
+                            length = Some(value.parse::<u16>().map_err(|_| {
+                                ParserError::InvalidAttribute("length".to_string())
+                            })?);
                         }
                         _ => {}
                     }
