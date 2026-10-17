@@ -18,7 +18,7 @@ axum = "0.8"
 metrics = "0.22"
 # Only the recorder: /metrics is served by our own axum server, so the HTTP listener and
 # push gateway (hyper, native-tls, openssl) are left out.
-metrics-exporter-prometheus = { version = "0.13", default-features = false }
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
 
 modbus-client = { path = "../modbus-client" }
 sunspec-parser = { path = "../sunspec-parser" }
