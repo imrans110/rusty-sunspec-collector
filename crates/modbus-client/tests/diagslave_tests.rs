@@ -13,14 +13,16 @@ async fn diagslave_integration_read() {
     let count = env_u16("MODBUS_TEST_COUNT").unwrap_or(8);
     let max_batch = env_u16("MODBUS_TEST_MAX_BATCH").unwrap_or(2);
 
-    let mut config = ClientConfig::default();
-    config.host = host;
-    config.port = port;
-    config.max_batch_size = Some(max_batch);
-    config.timeout_ms = env_u64("MODBUS_TEST_TIMEOUT_MS").unwrap_or(1_000);
-    config.retry_count = env_usize("MODBUS_TEST_RETRY_COUNT").unwrap_or(1);
-    config.retry_backoff_ms = env_u64("MODBUS_TEST_RETRY_BACKOFF_MS").unwrap_or(100);
-    config.retry_max_backoff_ms = env_u64("MODBUS_TEST_RETRY_MAX_BACKOFF_MS").unwrap_or(500);
+    let config = ClientConfig {
+        host,
+        port,
+        max_batch_size: Some(max_batch),
+        timeout_ms: env_u64("MODBUS_TEST_TIMEOUT_MS").unwrap_or(1_000),
+        retry_count: env_usize("MODBUS_TEST_RETRY_COUNT").unwrap_or(1),
+        retry_backoff_ms: env_u64("MODBUS_TEST_RETRY_BACKOFF_MS").unwrap_or(100),
+        retry_max_backoff_ms: env_u64("MODBUS_TEST_RETRY_MAX_BACKOFF_MS").unwrap_or(500),
+        ..Default::default()
+    };
 
     let client = ModbusClient::connect(config).await.expect("connect");
     let values = client

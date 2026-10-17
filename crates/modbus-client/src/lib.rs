@@ -10,6 +10,9 @@ use tokio_modbus::client::Context;
 use tokio_modbus::prelude::{Reader, Slave, SlaveContext};
 use tracing::{debug, warn};
 
+/// Protocol limit for a single read holding registers (0x03) request.
+pub const MAX_REGISTERS_PER_READ: u16 = 125;
+
 /// Configuration options for connecting and polling a Modbus TCP device.
 #[cfg_attr(feature = "config", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone)]
@@ -17,6 +20,7 @@ pub struct ClientConfig {
     pub host: String,
     pub port: u16,
     /// Maximum number of registers to read in a single request; devices with quirks may require lower batch sizes.
+    /// Defaults to, and is capped at, [`MAX_REGISTERS_PER_READ`].
     pub max_batch_size: Option<u16>,
     /// Per-request timeout in milliseconds.
     pub timeout_ms: u64,
@@ -86,7 +90,11 @@ impl ModbusClient {
         }
 
         let mut ctx = self.context.lock().await;
-        let batch_size = self.config.max_batch_size.unwrap_or(count).max(1u16);
+        let batch_size = self
+            .config
+            .max_batch_size
+            .unwrap_or(MAX_REGISTERS_PER_READ)
+            .clamp(1, MAX_REGISTERS_PER_READ);
         let mut remaining = count;
         let mut offset = 0u16;
         let mut out = Vec::with_capacity(count as usize);
@@ -121,7 +129,6 @@ impl ModbusClient {
     ) -> Result<Vec<u16>, ClientError> {
         ctx.set_slave(Slave(unit_id));
         let mut attempts = 0usize;
-        let mut last_error = None;
 
         loop {
             let result = timeout(
@@ -129,27 +136,25 @@ impl ModbusClient {
                 ctx.read_holding_registers(start, count),
             )
             .await;
-            match result {
+            let error = match result {
                 Ok(Ok(values)) => {
                     debug!(unit_id, start, count, "modbus read ok");
                     return Ok(values);
                 }
                 Ok(Err(err)) => {
                     warn!(unit_id, start, count, error = %err, "modbus read error");
-                    last_error = Some(ClientError::Io(err));
+                    ClientError::Io(err)
                 }
                 Err(_) => {
                     warn!(unit_id, start, count, "modbus read timeout");
-                    last_error = Some(ClientError::Timeout {
+                    ClientError::Timeout {
                         timeout_ms: self.config.timeout_ms,
-                    });
+                    }
                 }
-            }
+            };
 
             if attempts >= self.config.retry_count {
-                return Err(last_error.unwrap_or(ClientError::Timeout {
-                    timeout_ms: self.config.timeout_ms,
-                }));
+                return Err(error);
             }
 
             let delay_ms = self.retry_delay_ms(attempts);

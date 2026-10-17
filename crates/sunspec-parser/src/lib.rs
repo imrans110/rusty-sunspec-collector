@@ -122,7 +122,9 @@ pub fn parse_models_from_xml(data: &str) -> Result<Vec<ModelDefinition>, ParserE
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref event)) if event.name().as_ref() == b"model" => {
+            Ok(Event::Start(ref event) | Event::Empty(ref event))
+                if event.name().as_ref() == b"model" =>
+            {
                 let mut id = None;
                 let mut name = None;
                 let mut length = None;

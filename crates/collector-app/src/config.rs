@@ -165,7 +165,7 @@ fn apply_env_overrides(config: &mut CollectorConfig) {
         config.discovery.subnet = value;
     }
 
-    if let Some(ids) = env::var("SUNSPEC_DISCOVERY_UNIT_IDS").ok() {
+    if let Ok(ids) = env::var("SUNSPEC_DISCOVERY_UNIT_IDS") {
         config.discovery_unit_ids = parse_unit_id_list(&ids);
         config.discovery.unit_ids = config.discovery_unit_ids.clone();
     }
@@ -195,11 +195,11 @@ fn apply_env_overrides(config: &mut CollectorConfig) {
         config.modbus.timeout_ms = timeout_ms;
     }
 
-    if let Some(value) = env::var("SUNSPEC_STATIC_DEVICES").ok() {
+    if let Ok(value) = env::var("SUNSPEC_STATIC_DEVICES") {
         config.discovery.static_devices = parse_static_devices(&value);
     }
 
-    if let Some(value) = env::var("SUNSPEC_BUFFER_PATH").ok() {
+    if let Ok(value) = env::var("SUNSPEC_BUFFER_PATH") {
         config.buffer_path = value;
     }
 
@@ -219,18 +219,22 @@ fn apply_env_overrides(config: &mut CollectorConfig) {
     config.respawn_delay_ms =
         parse_env_u64("SUNSPEC_RESPAWN_DELAY_MS").unwrap_or(config.respawn_delay_ms);
 
-    config.kafka_brokers = env::var("SUNSPEC_KAFKA_BROKERS")
-        .ok()
-        .or(config.kafka_brokers);
-    config.kafka_client_id = env::var("SUNSPEC_KAFKA_CLIENT_ID")
-        .ok()
-        .or(config.kafka_client_id);
-    config.kafka_acks = env::var("SUNSPEC_KAFKA_ACKS").ok().or(config.kafka_acks);
-    config.kafka_compression = env::var("SUNSPEC_KAFKA_COMPRESSION")
-        .ok()
-        .or(config.kafka_compression);
+    if let Ok(value) = env::var("SUNSPEC_KAFKA_BROKERS") {
+        config.kafka_brokers = Some(value);
+    }
+    if let Ok(value) = env::var("SUNSPEC_KAFKA_CLIENT_ID") {
+        config.kafka_client_id = Some(value);
+    }
+    if let Ok(value) = env::var("SUNSPEC_KAFKA_ACKS") {
+        config.kafka_acks = Some(value);
+    }
+    if let Ok(value) = env::var("SUNSPEC_KAFKA_COMPRESSION") {
+        config.kafka_compression = Some(value);
+    }
     config.kafka_timeout_ms = parse_env_u64("SUNSPEC_KAFKA_TIMEOUT_MS").or(config.kafka_timeout_ms);
-    config.kafka_topic = env::var("SUNSPEC_KAFKA_TOPIC").ok().or(config.kafka_topic);
+    if let Ok(value) = env::var("SUNSPEC_KAFKA_TOPIC") {
+        config.kafka_topic = Some(value);
+    }
     config.kafka_enable_idempotence =
         parse_env_bool("SUNSPEC_KAFKA_IDEMPOTENCE").or(config.kafka_enable_idempotence);
 

@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 use tracing::{info, warn};
 
 use axum::{routing::get, Router};
@@ -55,24 +55,22 @@ async fn main() -> Result<()> {
 
     let (tx, rx) = mpsc::channel(config.channel_capacity);
     let publisher = if let Some(brokers) = config.kafka_brokers.clone() {
-        let mut kafka_config = KafkaConfig::default();
-        kafka_config.brokers = brokers;
-        kafka_config.client_id = config
-            .kafka_client_id
-            .clone()
-            .unwrap_or_else(|| "sunspec-collector".to_string());
-        kafka_config.acks = config
-            .kafka_acks
-            .clone()
-            .unwrap_or_else(|| "all".to_string());
-        kafka_config.compression = config
-            .kafka_compression
-            .clone()
-            .unwrap_or_else(|| "zstd".to_string());
-        kafka_config.message_timeout_ms = config.kafka_timeout_ms.unwrap_or(5_000);
-        if let Some(enable_idempotence) = config.kafka_enable_idempotence {
-            kafka_config.enable_idempotence = enable_idempotence;
-        }
+        let defaults = KafkaConfig::default();
+        let kafka_config = KafkaConfig {
+            brokers,
+            client_id: config.kafka_client_id.clone().unwrap_or(defaults.client_id),
+            acks: config.kafka_acks.clone().unwrap_or(defaults.acks),
+            compression: config
+                .kafka_compression
+                .clone()
+                .unwrap_or(defaults.compression),
+            message_timeout_ms: config
+                .kafka_timeout_ms
+                .unwrap_or(defaults.message_timeout_ms),
+            enable_idempotence: config
+                .kafka_enable_idempotence
+                .unwrap_or(defaults.enable_idempotence),
+        };
 
         Publisher::new_kafka(
             Publisher::default_schema(),
@@ -114,7 +112,8 @@ async fn main() -> Result<()> {
     notify_ready();
     let watchdog_handle = start_watchdog(shutdown_rx.clone());
 
-    let mut shutdown_signal = tokio::signal::ctrl_c();
+    let shutdown_signal = tokio::signal::ctrl_c();
+    tokio::pin!(shutdown_signal);
     loop {
         tokio::select! {
             _ = &mut shutdown_signal => {
@@ -153,6 +152,9 @@ async fn main() -> Result<()> {
                         }
                     }
                 } else {
+                    // No pollers left: stop the buffer/uplink tasks too, or the awaits below hang.
+                    warn!("no pollers running, shutting down");
+                    let _ = shutdown_tx.send(true);
                     break;
                 }
             }
@@ -375,7 +377,7 @@ async fn uplink_task(
                              match publisher.publish_bytes(publisher.topic(), &avro_payload).await {
                                  Ok(()) => {
                                      let duration = start.elapsed();
-                                     histogram!("uplink_publish_latency", duration);
+                                     histogram!("uplink_publish_latency").record(duration);
                                      counter!("uplink_messages_sent", "batch_size" => valid_count.to_string()).increment(valid_count as u64);
                                  }
                                  Err(err) => {
@@ -410,7 +412,7 @@ async fn uplink_task(
 
                 let queue_depth = match buffer.pending_count().await {
                     Ok(count) => {
-                        gauge!("buffer_size", count as f64);
+                        gauge!("buffer_size").set(count as f64);
                         Some(count)
                     }
                     Err(err) => {
@@ -474,7 +476,7 @@ fn uplink_delay(
     }
 
     let shift = failures.saturating_sub(1).min(31);
-    let factor = 1u64 << shift;
+    let factor = 1u32 << shift;
     let candidate = backoff_base.saturating_mul(factor);
     let backoff = if candidate > backoff_max {
         backoff_max

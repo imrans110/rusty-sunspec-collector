@@ -14,19 +14,20 @@ async fn e2e_harness_serializes_and_buffers() {
         .expect("buffer init");
     let publisher = Publisher::new_mock(Publisher::default_schema(), "sunspec.telemetry");
 
-    let sample = PollSample::new(
-        DeviceIdentity {
+    let sample = PollSample {
+        device: DeviceIdentity {
             ip: "127.0.0.1".to_string(),
             unit_id: 1,
         },
-        103,
-        "three_phase_inverter",
-        40_002,
-        vec![1, 2, 3, 4],
-        unix_ms(),
-    );
+        model_id: 103,
+        model_name: "three_phase_inverter".to_string(),
+        start: 40_002,
+        registers: vec![1, 2, 3, 4],
+        collected_at_ms: unix_ms(),
+    };
 
-    let payload = publisher.serialize(&sample).expect("serialize");
+    // Mirror the collector pipeline: JSON into the buffer, Avro on uplink.
+    let payload = serde_json::to_vec(&sample).expect("json encode");
     buffer
         .enqueue(publisher.topic(), &payload)
         .await
@@ -35,8 +36,12 @@ async fn e2e_harness_serializes_and_buffers() {
     let batch = buffer.dequeue_batch(10).await.expect("dequeue");
     assert_eq!(batch.len(), 1);
 
+    let decoded: PollSample = serde_json::from_slice(&batch[0].payload).expect("json decode");
+    let avro_payload = publisher.serialize_batch(&[decoded]).expect("avro encode");
+    assert!(!avro_payload.is_empty());
+
     publisher
-        .publish_bytes(&batch[0].topic, &batch[0].payload)
+        .publish_bytes(&batch[0].topic, &avro_payload)
         .await
         .expect("publish bytes");
     buffer.delete_batch(&[batch[0].id]).await.expect("delete");

@@ -26,10 +26,12 @@ async fn kafka_publish_integration() {
     let topic =
         std::env::var("SUNSPEC_KAFKA_TOPIC").unwrap_or_else(|_| "sunspec.telemetry".to_string());
 
-    let mut config = KafkaConfig::default();
-    config.brokers = brokers;
-    config.client_id = std::env::var("SUNSPEC_KAFKA_CLIENT_ID")
-        .unwrap_or_else(|_| "sunspec-collector-tests".to_string());
+    let config = KafkaConfig {
+        brokers,
+        client_id: std::env::var("SUNSPEC_KAFKA_CLIENT_ID")
+            .unwrap_or_else(|_| "sunspec-collector-tests".to_string()),
+        ..Default::default()
+    };
 
     let publisher =
         Publisher::new_kafka(Publisher::default_schema(), &topic, config).expect("publisher init");
