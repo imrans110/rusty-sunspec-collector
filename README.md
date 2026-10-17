@@ -142,6 +142,11 @@ The settings most deployments change:
 | `buffer.path` | `SUNSPEC_BUFFER_PATH` | `sunspec-buffer.sqlite` in the working directory (`/app/data` in Docker) |
 | `kafka.brokers` | `SUNSPEC_KAFKA_BROKERS` | none (records are only logged) |
 | `kafka.topic` | `SUNSPEC_KAFKA_TOPIC` | `sunspec.telemetry` |
+| `kafka.security_protocol` | `SUNSPEC_KAFKA_SECURITY_PROTOCOL` | `plaintext` (`ssl`, `sasl_plaintext`, `sasl_ssl`) |
+
+TLS (including mutual TLS) and SASL PLAIN or SCRAM authentication are configured with the
+`kafka.ssl_*` and `kafka.sasl_*` keys. Passwords can be read from files (`*_password_file`), which
+works with Docker secrets and systemd credentials; the compose stack authenticates this way.
 
 Logging is set with `RUST_LOG` (default `info`) and `SUNSPEC_LOG_FORMAT=text|json`.
 
@@ -246,8 +251,8 @@ build files change. See [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) for d
 
 ## Limitations
 
-- Kafka TLS and SASL settings are not exposed in the configuration yet (librdkafka is built with
-  SSL support).
+- Kafka authentication is limited to SASL PLAIN and SCRAM (no Kerberos or OAuth), and rotated
+  certificates are picked up on restart.
 - No Schema Registry integration; records use fingerprint-based single-object encoding instead.
 - Point metadata (units, labels) is not in the payload; consumers look it up by model and point
   name in the bundled definitions.

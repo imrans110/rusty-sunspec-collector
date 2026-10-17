@@ -103,9 +103,9 @@ Docker marks a container `unhealthy` when the health check fails but does not re
 
 | Service | Image | Notes |
 |---------|-------|-------|
-| `kafka` | `apache/kafka:3.9.1` (KRaft) | Reachable from the host at `localhost:29092` |
+| `kafka` | `apache/kafka:3.9.1` (KRaft) | Plaintext from the host at `localhost:29092`; SASL/PLAIN listener on `kafka:9094` inside the network |
 | `simulator` | built from the `simulator` target | Units 1 and 2 on port 1502 |
-| `collector` | built from the `collector` target | Polls `simulator:1` and `simulator:2`; port 9090; data in volume `collector-data` |
+| `collector` | built from the `collector` target | Polls `simulator:1` and `simulator:2`; publishes over SASL/PLAIN with its password from a Docker secret; port 9090; data in volume `collector-data` |
 | `prometheus` | `prom/prometheus:v3.5.0` | `http://localhost:9091`, scraping the collector via `docker/prometheus.yml` |
 
 ```sh
@@ -179,6 +179,68 @@ journalctl -u sunspec-collector -p warning --no-pager # warnings and errors only
 ```
 
 ---
+
+## Securing the Kafka connection
+
+The collector supports TLS, mutual TLS and SASL (`PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`); the
+keys are listed in [Configuration](configuration.md#connection-security-tls-and-sasl). Use
+`sasl_ssl` or `ssl` whenever the traffic leaves the site: `sasl_plaintext` sends the password and
+the telemetry unencrypted, and the collector logs a warning when it is used.
+
+SCRAM over TLS, with the password in a file:
+
+```toml
+[kafka]
+brokers = "kafka-1.example.com:9093,kafka-2.example.com:9093"
+security_protocol = "sasl_ssl"
+ssl_ca_location = "/etc/sunspec-collector/kafka-ca.pem"
+sasl_mechanism = "SCRAM-SHA-512"
+sasl_username = "site-0042"
+sasl_password_file = "/run/credentials/sunspec-collector.service/kafka-password"
+```
+
+Mutual TLS instead of SASL: set `security_protocol = "ssl"`, `ssl_ca_location`,
+`ssl_certificate_location` and `ssl_key_location` (plus `ssl_key_password_file` if the key is
+encrypted).
+
+### Keeping secrets out of config and environment files
+
+Prefer the `*_password_file` settings over putting passwords in the config file or environment:
+
+- **systemd:** store the password root-only on the host and pass it as a credential. Add to the
+  unit (or a drop-in from `systemctl edit sunspec-collector`):
+
+  ```ini
+  [Service]
+  LoadCredential=kafka-password:/etc/sunspec-collector/kafka-password
+  Environment=SUNSPEC_KAFKA_SASL_PASSWORD_FILE=/run/credentials/sunspec-collector.service/kafka-password
+  ```
+
+  The file is readable only by the service, which also works with `DynamicUser=yes`.
+- **Docker / Compose:** mount the password as a secret and point the `_FILE` variable at it, as
+  the local stack does:
+
+  ```yaml
+  services:
+    collector:
+      environment:
+        SUNSPEC_KAFKA_SASL_PASSWORD_FILE: /run/secrets/kafka_sasl_password
+      secrets:
+        - kafka_sasl_password
+  secrets:
+    kafka_sasl_password:
+      file: ./kafka-sasl-password
+  ```
+
+  The secret file must be readable by the container user (`collector`).
+
+The compose stack's password (`docker/dev-secrets/`) is a development-only value.
+
+### Rotating credentials
+
+Certificates, keys and passwords are read when the collector starts. After rotating them, restart
+the service (`systemctl restart sunspec-collector` or `docker compose restart collector`). Unsent
+samples stay in the buffer and are published after the restart.
 
 ## HTTP endpoints
 
@@ -482,8 +544,10 @@ online is picked up within about a minute without restarting the collector.
    removed from the buffer.
 2. Check `sunspec_uplink_errors_total` and the `records not delivered; they stay buffered` log
    line. Rising errors mean the brokers are unreachable or are rejecting the records (wrong
-   address, missing topic with auto-creation disabled, ACLs, or brokers that require TLS or SASL,
-   which the collector does not support yet). librdkafka's own error lines name the broker.
+   address, missing topic with auto-creation disabled, ACLs, or a security mismatch). librdkafka's
+   own error lines name the broker; authentication problems show up as `SASL authentication
+   error` or `SSL handshake failed`. Check `kafka.security_protocol`, the SASL mechanism and
+   credentials, and that `kafka.ssl_ca_location` holds the CA that signed the broker certificate.
 3. Check `sunspec_buffer_oldest_age_seconds` and `sunspec_buffer_rows`. If they grow while
    `sunspec_uplink_records_total` is flat, nothing is being delivered.
 4. If records arrive but consumers fail to read them, the consumers may still expect the old

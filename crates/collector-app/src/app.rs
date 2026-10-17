@@ -130,6 +130,7 @@ fn build_publisher(config: &CollectorConfig) -> Result<Publisher> {
         enable_idempotence: config
             .kafka_enable_idempotence
             .unwrap_or(defaults.enable_idempotence),
+        security: config.kafka_security.clone(),
     };
     Publisher::new_kafka(topic, kafka_config).context("kafka publisher init failed")
 }

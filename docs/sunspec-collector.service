@@ -16,6 +16,9 @@ WatchdogSec=30
 # uplink drains for up to buffer.shutdown_drain_timeout_ms (default 5 s).
 TimeoutStopSec=30
 LimitNOFILE=4096
+# Kafka password as a systemd credential (readable only by this service), used with
+# SUNSPEC_KAFKA_SASL_PASSWORD_FILE=/run/credentials/sunspec-collector.service/kafka-password
+#LoadCredential=kafka-password:/etc/sunspec-collector/kafka-password
 
 # Run as an unprivileged, per-service user; systemd creates and owns
 # /var/lib/sunspec-collector for the SQLite buffer.

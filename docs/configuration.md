@@ -226,8 +226,35 @@ the container is removed.
 | `kafka.timeout_ms` | `SUNSPEC_KAFKA_TIMEOUT_MS` | `5000` | librdkafka `message.timeout.ms`: how long the producer tries to deliver a record before it is reported as undelivered. Undelivered rows stay in the buffer. ≥ 1. |
 | `kafka.enable_idempotence` | `SUNSPEC_KAFKA_IDEMPOTENCE` | `true` | librdkafka `enable.idempotence`. The env value must be exactly `true` or `false`. |
 
-The producer also sets `linger.ms=50`; this is not configurable. TLS and SASL settings are not
-exposed yet, so brokers must accept plaintext connections from the collector.
+The producer also sets `linger.ms=50`; this is not configurable.
+
+#### Connection security (TLS and SASL)
+
+| File key | Env var | Default | Notes |
+|----------|---------|---------|-------|
+| `kafka.security_protocol` | `SUNSPEC_KAFKA_SECURITY_PROTOCOL` | `plaintext` | One of `plaintext`, `ssl`, `sasl_plaintext`, `sasl_ssl` (lowercase). `sasl_plaintext` logs a warning: credentials and data are not encrypted. |
+| `kafka.ssl_ca_location` | `SUNSPEC_KAFKA_SSL_CA_LOCATION` | system CAs | PEM file or directory used to verify the broker. Must exist. |
+| `kafka.ssl_certificate_location` | `SUNSPEC_KAFKA_SSL_CERTIFICATE_LOCATION` | unset | Client certificate (PEM) for mutual TLS. Must exist; set together with the key. |
+| `kafka.ssl_key_location` | `SUNSPEC_KAFKA_SSL_KEY_LOCATION` | unset | Client private key (PEM) for mutual TLS. Must exist; set together with the certificate. |
+| `kafka.ssl_key_password` / `kafka.ssl_key_password_file` | `SUNSPEC_KAFKA_SSL_KEY_PASSWORD` / `SUNSPEC_KAFKA_SSL_KEY_PASSWORD_FILE` | unset | Passphrase of an encrypted private key, given directly or as a file. |
+| `kafka.sasl_mechanism` | `SUNSPEC_KAFKA_SASL_MECHANISM` | unset | `PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512`. Required with a `sasl_*` protocol. |
+| `kafka.sasl_username` | `SUNSPEC_KAFKA_SASL_USERNAME` | unset | Required with a `sasl_*` protocol. |
+| `kafka.sasl_password` / `kafka.sasl_password_file` | `SUNSPEC_KAFKA_SASL_PASSWORD` / `SUNSPEC_KAFKA_SASL_PASSWORD_FILE` | unset | Required with a `sasl_*` protocol. Prefer the `_file` form. |
+
+Rules checked at startup:
+
+- `ssl_*` settings need `ssl` or `sasl_ssl`; `sasl_*` settings need `sasl_plaintext` or
+  `sasl_ssl`. Setting them with another protocol is an error, so a half-applied security
+  configuration cannot silently fall back to plaintext.
+- `*_file` settings read a file that contains only the secret (a trailing newline is removed).
+  Setting both a secret and its `_file` form is an error, as is an empty file.
+- Secrets never appear in logs: they are redacted in debug output.
+- librdkafka loads the CA and client certificate when the producer is created, so an unreadable
+  or invalid PEM file stops the collector at startup (`kafka publisher init failed`).
+
+GSSAPI (Kerberos) and OAUTHBEARER are not supported. Certificates are read at startup; restart the
+collector after rotating them (the buffer keeps unsent data across the restart). See
+[Securing the Kafka connection](ops.md#securing-the-kafka-connection) for deployment examples.
 
 ### `[metrics]`
 
