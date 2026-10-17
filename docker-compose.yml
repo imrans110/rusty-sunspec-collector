@@ -18,10 +18,8 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092,SASL_PLAINTEXT://kafka:9094
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
-      # listener.name.sasl_plaintext.plain.sasl.jaas.config (`__` becomes `_`).
-      KAFKA_LISTENER_NAME_SASL__PLAINTEXT_PLAIN_SASL_JAAS_CONFIG: >-
-        org.apache.kafka.common.security.plain.PlainLoginModule required
-        user_collector="collector-dev-only-secret";
+      # The image requires a JAAS file when a SASL listener is advertised.
+      KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/jaas/kafka_server_jaas.conf
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -38,6 +36,7 @@ services:
       retries: 30
     volumes:
       - kafka-data:/var/lib/kafka/data
+      - ./docker/dev-secrets/kafka_server_jaas.conf:/etc/kafka/jaas/kafka_server_jaas.conf:ro
 
   simulator:
     image: sunspec-simulator:local
