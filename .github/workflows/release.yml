@@ -225,6 +225,20 @@ jobs:
           echo "::error::the installed service never polled the simulator"
           exit 1
 
+      # The unit sets WatchdogSec=30, so a service whose watchdog pings never reach systemd is
+      # killed and restarted about 30 s after it starts.
+      - name: The service outlives its watchdog timeout
+        run: |
+          sleep 40
+          restarts=$(systemctl show -p NRestarts --value sunspec-collector)
+          echo "restarts: $restarts"
+          systemctl is-active sunspec-collector
+          if [ "$restarts" != 0 ] || sudo journalctl -u sunspec-collector --no-pager | grep -q "Watchdog timeout"; then
+            sudo journalctl -u sunspec-collector --no-pager | grep -i -E "watchdog|Scheduled restart" | tail -5
+            echo "::error::systemd restarted the service: its watchdog pings did not arrive"
+            exit 1
+          fi
+
       - name: Reinstall keeps the edited environment file
         run: |
           sudo SUNSPEC_BASE_URL="file://$PWD/dist" sh dist/install.sh
