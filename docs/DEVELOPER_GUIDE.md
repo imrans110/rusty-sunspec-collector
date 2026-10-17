@@ -454,11 +454,14 @@ in-memory register map, so the chain walk runs without a network. The config tar
 that could name a `*_file` setting, since loading reads those files.
 
 `fuzz/` is its own workspace (it needs nightly Rust and sanitizers), so the workspace commands
-above do not build it. To run a target locally:
+above do not build it. It has no committed lockfile: builds copy the workspace's `Cargo.lock`
+into `fuzz/` first, so the targets use the same dependency versions as the collector, and only
+one lockfile needs updates. To run a target locally:
 
 ```sh
 rustup toolchain install nightly
 cargo install cargo-fuzz --locked
+cp Cargo.lock fuzz/                          # build against the workspace's locked versions
 fuzz/seeds.py fuzz/seeds                     # seed corpora from fixtures/ and the example config
 cargo +nightly fuzz run -O decode_model fuzz/corpus/decode_model fuzz/seeds/decode_model \
   -- -max_total_time=300
@@ -568,9 +571,10 @@ the change in the CHANGELOG.
 - All crates share one version, `version` under `[workspace.package]` in `Cargo.toml`. Releases are
   published by `.github/workflows/release.yml` when a `v*` tag is pushed; the steps are in
   [Cutting a release](build.md#cutting-a-release).
-- Dependabot opens weekly pull requests for Cargo dependencies (the workspace and `fuzz/`, `deps`
-  prefix), GitHub Actions (`ci` prefix) and the base image digests of the Dockerfiles and
-  `.clusterfuzzlite/Dockerfile` (`docker` prefix). The Rust builder image
+- Dependabot opens weekly pull requests for Cargo dependencies (`deps` prefix; patch updates
+  grouped into one PR, minor and major updates one PR each, since a 0.x minor bump is
+  breaking), GitHub Actions (`ci` prefix; minor and patch releases grouped) and the base image
+  digests of the Dockerfiles and `.clusterfuzzlite/Dockerfile` (`docker` prefix, grouped). The Rust builder image
   stays on the MSRV, so Dependabot updates only its digest.
 
 ---

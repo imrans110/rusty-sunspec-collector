@@ -1,15 +1,19 @@
 version: 2
 updates:
+  # fuzz/ has no lockfile of its own (its build copies Cargo.lock), so only the workspace is
+  # watched. Patch updates arrive as one PR; minor ones get a PR each, since for 0.x crates a
+  # minor bump is a breaking one.
   - package-ecosystem: cargo
-    directories:
-      - /
-      - /fuzz
+    directory: /
     schedule:
       interval: weekly
     commit-message:
       prefix: "deps"
     labels:
       - dependencies
+    groups:
+      cargo-patch:
+        update-types: ["patch"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
@@ -20,6 +24,10 @@ updates:
       prefix: "ci"
     labels:
       - ci
+    # Minor and patch releases of the actions in one PR; major ones get a PR each.
+    groups:
+      actions-minor-and-patch:
+        update-types: ["minor", "patch"]
     open-pull-requests-limit: 3
 
   # Base images in the Dockerfiles (and the ClusterFuzzLite image), pinned by digest: digest
@@ -38,4 +46,7 @@ updates:
     ignore:
       - dependency-name: rust
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      docker-images:
+        patterns: ["*"]
     open-pull-requests-limit: 3
