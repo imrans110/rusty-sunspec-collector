@@ -5,15 +5,16 @@
 #     --build-arg TARGET=aarch64-unknown-linux-gnu --build-arg DEB_ARCH=arm64 \
 #     --build-arg MULTIARCH=aarch64-linux-gnu docker
 #
-# The cross-rs base images are Ubuntu 20.04, so the binaries need glibc 2.31 or newer
-# (Debian 11+, Ubuntu 20.04+, Raspberry Pi OS 11+). librdkafka is built from source by
+# The cross-rs 0.2.5 base images are Ubuntu 16.04, so the binaries need only glibc 2.18 (the
+# newest symbol version they use; the release workflow checks it). Pinned to the cross release
+# so a new base image cannot raise that floor unnoticed. librdkafka is built from source by
 # rdkafka's cmake-build feature. Build with `--features vendored-openssl`: OpenSSL is then
 # compiled from source and linked statically (the image's OpenSSL is too old for
 # librdkafka 2.12), so the binary does not depend on the target's OpenSSL. Only the curl
 # headers librdkafka 2.12 needs at compile time are installed for the target; SQLite is
 # bundled by sqlx and zstd by zstd-sys.
 ARG TARGET=aarch64-unknown-linux-gnu
-FROM ghcr.io/cross-rs/${TARGET}:latest
+FROM ghcr.io/cross-rs/${TARGET}:0.2.5
 
 # The target's Debian architecture (arm64, amd64) and multiarch directory.
 ARG DEB_ARCH=arm64

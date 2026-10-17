@@ -48,9 +48,9 @@ dropped (and counted) instead of growing the buffer without limit.
 ## Install
 
 Each [release](https://github.com/imrans110/rusty-sunspec-collector/releases) has prebuilt Linux
-binaries for x86_64 and aarch64 and multi-arch Docker images. The binaries need glibc 2.31 or newer
-(Debian 11+, Ubuntu 20.04+, Raspberry Pi OS 11+) and nothing else: OpenSSL, librdkafka, SQLite
-and zstd are linked in.
+binaries for x86_64 and aarch64 and multi-arch Docker images. The binaries need glibc 2.18 or newer
+and nothing else (OpenSSL, librdkafka, SQLite and zstd are linked in); the systemd unit needs
+systemd 235 or newer (Debian 10+, Ubuntu 18.04+, RHEL 8+, Raspberry Pi OS 10+).
 
 On a machine with systemd, install the latest release:
 

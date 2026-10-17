@@ -133,8 +133,8 @@ file template is [`sunspec-collector.env`](sunspec-collector.env).
 
 #### From a release
 
-On x86_64 or aarch64 Linux with glibc 2.31 or newer (Debian 11+, Ubuntu 20.04+, Raspberry Pi OS
-11+):
+On x86_64 or aarch64 Linux with glibc 2.18 or newer and systemd 235 or newer (Debian 10+,
+Ubuntu 18.04+, RHEL 8+, Raspberry Pi OS 10+):
 
 ```sh
 curl -fsSL https://github.com/imrans110/rusty-sunspec-collector/releases/latest/download/install.sh | sudo sh

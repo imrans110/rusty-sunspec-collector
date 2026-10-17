@@ -28,8 +28,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # The cross images are Ubuntu 20.04; the binaries must not need a newer glibc.
-  GLIBC_MAX: "2.31"
+  # The newest glibc symbol version the binaries may use, i.e. the oldest glibc they run on
+  # (the cross 0.2.5 images are Ubuntu 16.04). Keep scripts/install.sh and the docs in step.
+  GLIBC_MAX: "2.18"
 
 jobs:
   prepare:
@@ -137,7 +138,7 @@ jobs:
             echo "$bin links:" $needed
             for lib in $needed; do
               case "$lib" in
-                libc.so.6 | libm.so.6 | libdl.so.2 | libpthread.so.0 | librt.so.1 | libgcc_s.so.1 | libz.so.1 | ld-linux-*) ;;
+                libc.so.6 | libm.so.6 | libdl.so.2 | libpthread.so.0 | librt.so.1 | libgcc_s.so.1 | ld-linux-*) ;;
                 *) echo "::error::$bin links $lib, which target systems may not have"; exit 1 ;;
               esac
             done
@@ -232,7 +233,7 @@ jobs:
           {
             echo "## Install"
             echo
-            echo "On a Linux machine (x86_64 or aarch64, glibc $GLIBC_MAX or newer) with systemd:"
+            echo "On a Linux machine (x86_64 or aarch64, glibc $GLIBC_MAX or newer) with systemd 235 or newer:"
             echo
             echo '```sh'
             echo "curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/install.sh | sudo sh"

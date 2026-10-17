@@ -1,5 +1,6 @@
 #!/bin/sh
-# Installs a released collector-app on a Linux machine (x86_64 or aarch64, glibc 2.31+):
+# Installs a released collector-app on a Linux machine (x86_64 or aarch64, glibc 2.18+; the
+# systemd unit needs systemd 235+):
 #
 #   curl -fsSL https://github.com/imrans110/rusty-sunspec-collector/releases/latest/download/install.sh | sudo sh
 #
@@ -21,7 +22,8 @@
 set -eu
 
 repo=imrans110/rusty-sunspec-collector
-min_glibc=2.31
+min_glibc=2.18
+min_systemd=235
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
@@ -135,6 +137,10 @@ main() {
     if [ "$native" = yes ]; then
         installed=$("$bin_dir/collector-app" --version) || die "the installed binary does not run"
         if [ -z "$root" ] && command -v systemctl >/dev/null 2>&1; then
+            systemd=$(systemctl --version | awk 'NR == 1 { print $2 }')
+            if [ "${systemd:-0}" -lt "$min_systemd" ] 2>/dev/null; then
+                say "Warning: the unit needs systemd $min_systemd or newer (DynamicUser, StateDirectory); this is $systemd"
+            fi
             systemctl daemon-reload
         fi
     else

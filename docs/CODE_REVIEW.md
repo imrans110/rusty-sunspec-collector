@@ -200,9 +200,10 @@ The initial review uncovered **3 compilation/runtime bugs**, **8 high-severity i
 
 **Fix**: Added `rust-version = "1.80"` to `[workspace.package]` in root `Cargo.toml`.
 
-#### 4.6 ARM64 Dockerfile uses `:latest` tag ⚠️
+#### 4.6 ARM64 Dockerfile uses `:latest` tag ✅
 
-**Status**: Not changed. Requires testing with a pinned version of the cross image.
+**Fix**: `docker/Dockerfile.cross` (formerly `Dockerfile.arm64`) pins `ghcr.io/cross-rs/<target>:0.2.5`;
+the release workflow builds with it and checks the resulting glibc floor (2.18).
 
 ---
 

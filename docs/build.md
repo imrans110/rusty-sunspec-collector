@@ -225,9 +225,9 @@ Kafka data. `docker compose stop` gives containers 10 s before killing them; use
 
 Release binaries are built with [`cross`](https://github.com/cross-rs/cross) for
 `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, in images derived from the cross-rs
-Ubuntu 20.04 images. They need glibc 2.31 or newer and link nothing else that a target system might
-lack: OpenSSL is vendored, librdkafka, SQLite and zstd are compiled in, and the remaining shared
-libraries are glibc's, `libgcc_s` and `libz`.
+0.2.5 images (Ubuntu 16.04). They need glibc 2.18 or newer and link nothing else that a target
+system might lack: OpenSSL is vendored, librdkafka, SQLite, zstd and zlib are compiled in, and the
+only shared libraries are glibc's and `libgcc_s`.
 
 ```sh
 cargo install cross --locked
@@ -236,12 +236,12 @@ docker build -t "sunspec-cross-$target" -f docker/Dockerfile.cross \
   --build-arg TARGET=$target --build-arg DEB_ARCH=arm64 --build-arg MULTIARCH=aarch64-linux-gnu docker
 cross build --release --locked --target $target -p collector-app -p sunspec-sim \
   --features collector-app/vendored-openssl
-readelf -d target/$target/release/collector-app | grep NEEDED    # glibc, libgcc_s, libz only
+readelf -d target/$target/release/collector-app | grep NEEDED    # glibc and libgcc_s only
 ```
 
 - `Cross.toml` maps each target to the image tag `sunspec-cross-<target>`; build the image under
   that tag first.
-- `docker/Dockerfile.cross` starts from `ghcr.io/cross-rs/<target>:latest`, adds the target's
+- `docker/Dockerfile.cross` starts from `ghcr.io/cross-rs/<target>:0.2.5`, adds the target's
   Debian architecture if it is not the image's own, installs `cmake`, `make`, `perl`, `pkg-config`
   and `libcurl4-openssl-dev` for the target (the curl headers librdkafka needs at compile time),
   and points `PKG_CONFIG_LIBDIR` and `PKG_CONFIG_PATH` at the target's multiarch directory.
@@ -284,7 +284,7 @@ Dockerfiles, `Cross.toml`, `scripts/` or the workflow, on manual dispatch, and o
 | Job | What it does |
 |-----|--------------|
 | Prepare | Lints `scripts/` with shellcheck; works out the version. On a tag it must equal the workspace version, point at a commit on `main`, and have a `CHANGELOG.md` section |
-| Build | Cross-compiles both targets; checks the ELF machine, that only glibc, `libgcc_s` and `libz` are linked, and that no glibc symbol is newer than 2.31; packages the archives |
+| Build | Cross-compiles both targets; checks the ELF machine, that only glibc and `libgcc_s` are linked, and that no glibc symbol is newer than 2.18; packages the archives |
 | Assemble | Adds `install.sh` (with the version filled in), `SHA256SUMS` and the release notes; installs with `sudo sh install.sh` on the runner, starts the service under systemd against the simulator, checks it polls, and reinstalls to check the environment file is kept |
 | Image | Builds each image for `linux/amd64` and `linux/arm64` from the archived binaries and runs `--version` on both platforms (under QEMU for arm64) |
 | Publish | On a tag only: pushes the images and creates the GitHub Release |
