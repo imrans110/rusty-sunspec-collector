@@ -5,6 +5,7 @@ RUN apt-get update
 
 RUN apt-get install -y --no-install-recommends \
     libssl-dev:arm64 \
+    libcurl4-openssl-dev:arm64 \
     libsqlite3-dev:arm64 \
     librdkafka-dev:arm64 \
     pkg-config

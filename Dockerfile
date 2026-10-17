@@ -2,12 +2,13 @@
 FROM rust:1.80-slim-bookworm AS builder
 
 # Install build dependencies
-# cmake is required for rdkafka-sys
+# cmake is required for rdkafka-sys; librdkafka 2.12 also needs the curl headers to compile
 # build-essential, pkg-config, libssl-dev are standard requirements
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     build-essential \
     libssl-dev \
+    libcurl4-openssl-dev \
     pkg-config \
     python3 \
     && rm -rf /var/lib/apt/lists/*

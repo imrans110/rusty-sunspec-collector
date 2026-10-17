@@ -11,7 +11,7 @@ serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 apache-avro = { version = "0.21", features = ["derive"] }
-rdkafka = { version = "0.36", features = ["cmake-build", "ssl", "tokio"] }
+rdkafka = { version = "0.39", features = ["cmake-build", "ssl", "tokio"] }
 
 types = { path = "../types" }
 

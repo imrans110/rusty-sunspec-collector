@@ -27,7 +27,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libssl-dev pkg-config
+          sudo apt-get install -y cmake libssl-dev libcurl4-openssl-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -53,7 +53,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libssl-dev pkg-config
+          sudo apt-get install -y cmake libssl-dev libcurl4-openssl-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
 
