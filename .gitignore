@@ -1,4 +1,10 @@
-/target
+# Build output at any depth (the workspace and fuzz/), and the fuzzer's working directories,
+# ignored here too so a branch without fuzz/.gitignore cannot pick them up.
+target/
+fuzz/artifacts/
+fuzz/corpus/
+fuzz/coverage/
+fuzz/seeds/
 **/*.rs.bk
 .DS_Store
 .env
