@@ -231,9 +231,12 @@ only shared libraries are glibc's and `libgcc_s`.
 
 ```sh
 cargo install cross --locked
-target=aarch64-unknown-linux-gnu      # or x86_64-unknown-linux-gnu (DEB_ARCH=amd64, MULTIARCH=x86_64-linux-gnu)
-docker build -t "sunspec-cross-$target" -f docker/Dockerfile.cross \
-  --build-arg TARGET=$target --build-arg DEB_ARCH=arm64 --build-arg MULTIARCH=aarch64-linux-gnu docker
+target=aarch64-unknown-linux-gnu
+docker build -t "sunspec-cross-$target" -f docker/Dockerfile.cross docker
+# x86_64: pass the pinned image from the release workflow's build matrix
+# docker build -t sunspec-cross-x86_64-unknown-linux-gnu -f docker/Dockerfile.cross \
+#   --build-arg BASE_IMAGE=ghcr.io/cross-rs/x86_64-unknown-linux-gnu:0.2.5@sha256:<digest> \
+#   --build-arg DEB_ARCH=amd64 --build-arg MULTIARCH=x86_64-linux-gnu docker
 cross build --release --locked --target $target -p collector-app -p sunspec-sim \
   --features collector-app/vendored-openssl
 readelf -d target/$target/release/collector-app | grep NEEDED    # glibc and libgcc_s only
@@ -241,10 +244,12 @@ readelf -d target/$target/release/collector-app | grep NEEDED    # glibc and lib
 
 - `Cross.toml` maps each target to the image tag `sunspec-cross-<target>`; build the image under
   that tag first.
-- `docker/Dockerfile.cross` starts from `ghcr.io/cross-rs/<target>:0.2.5`, adds the target's
-  Debian architecture if it is not the image's own, installs `cmake`, `make`, `perl`, `pkg-config`
-  and `libcurl4-openssl-dev` for the target (the curl headers librdkafka needs at compile time),
-  and points `PKG_CONFIG_LIBDIR` and `PKG_CONFIG_PATH` at the target's multiarch directory.
+- `docker/Dockerfile.cross` starts from `BASE_IMAGE`, the target's
+  `ghcr.io/cross-rs/<target>:0.2.5` image pinned by digest (the default is the aarch64 one; the
+  release workflow's build matrix lists both). It adds the target's Debian architecture if it is
+  not the image's own, installs `cmake`, `make`, `perl`, `pkg-config` and `libcurl4-openssl-dev`
+  for the target (the curl headers librdkafka needs at compile time), and points
+  `PKG_CONFIG_LIBDIR` and `PKG_CONFIG_PATH` at the target's multiarch directory.
 - `--features collector-app/vendored-openssl` is required: the images' OpenSSL is older than the
   version librdkafka 2.12 needs. OpenSSL is compiled from source (hence `make` and `perl`).
 
