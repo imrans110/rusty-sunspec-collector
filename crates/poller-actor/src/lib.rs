@@ -1,6 +1,7 @@
 //! Per-device lifecycle: connect, discover the SunSpec model chain, poll on a fixed
 //! schedule, and recover from failures (including stalls) until shutdown.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -39,6 +40,8 @@ pub struct ActorConfig {
     /// Base delay before retrying a failed device session; doubles per consecutive
     /// failure up to 60 seconds.
     pub respawn_delay: Duration,
+    /// Which discovered models are polled, and which are read less often.
+    pub models: ModelSchedule,
 }
 
 impl Default for ActorConfig {
@@ -49,6 +52,7 @@ impl Default for ActorConfig {
             jitter_ms: 0,
             stall_timeout: None,
             respawn_delay: Duration::from_secs(1),
+            models: ModelSchedule::default(),
         }
     }
 }
@@ -57,6 +61,34 @@ impl ActorConfig {
     pub fn effective_stall_timeout(&self) -> Duration {
         self.stall_timeout
             .unwrap_or_else(|| (self.poll_interval * 10).max(MIN_STALL_TIMEOUT))
+    }
+}
+
+/// Which of a device's models are polled, and how often. By default every discovered
+/// model is read on every poll cycle.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelSchedule {
+    /// When set, only these models are polled.
+    pub include: Option<BTreeSet<u16>>,
+    /// Models that are never polled.
+    pub exclude: BTreeSet<u16>,
+    /// Models read at most once per interval instead of every cycle, e.g. nameplate
+    /// and settings models that rarely change.
+    pub intervals: BTreeMap<u16, Duration>,
+}
+
+impl ModelSchedule {
+    pub fn polls(&self, model_id: u16) -> bool {
+        !self.exclude.contains(&model_id)
+            && self
+                .include
+                .as_ref()
+                .is_none_or(|include| include.contains(&model_id))
+    }
+
+    /// The model's slow interval, if it has one.
+    pub fn interval(&self, model_id: u16) -> Option<Duration> {
+        self.intervals.get(&model_id).copied()
     }
 }
 
@@ -79,6 +111,8 @@ pub enum PollerError {
     NoSunSpecMap(Vec<u16>),
     #[error("SunSpec model chain is malformed: {0}")]
     MalformedChain(&'static str),
+    #[error("none of the discovered models {0:?} is selected for polling")]
+    NothingToPoll(Vec<u16>),
     #[error("{0} consecutive poll cycles failed")]
     TooManyFailedCycles(u32),
     #[error("no successful read for {0:?}")]
@@ -92,6 +126,8 @@ pub enum PollerError {
 pub struct DeviceHealth {
     up: AtomicBool,
     last_success_ms: AtomicU64,
+    /// Last successful read or poll cycle with nothing due; drives stall detection.
+    last_progress_ms: AtomicU64,
     restarts: AtomicU64,
 }
 
@@ -112,11 +148,18 @@ impl DeviceHealth {
     fn record_success(&self, device: &str) {
         let now = unix_ms();
         self.last_success_ms.store(now, Ordering::Relaxed);
+        self.last_progress_ms.store(now, Ordering::Relaxed);
         if !self.up.swap(true, Ordering::Relaxed) {
             gauge!("sunspec_device_up", "device" => device.to_string()).set(1.0);
         }
         gauge!("sunspec_device_last_success_timestamp_seconds", "device" => device.to_string())
             .set(now as f64 / 1000.0);
+    }
+
+    /// A poll cycle in which no model was due (all remaining ones are on slow
+    /// intervals) is not a stall.
+    fn record_idle_cycle(&self) {
+        self.last_progress_ms.store(unix_ms(), Ordering::Relaxed);
     }
 
     fn mark_down(&self, device: &str) {
@@ -257,7 +300,7 @@ async fn run_session(
 ) -> Option<PollerError> {
     let stall_timeout = config.actor.effective_stall_timeout();
     let mut last_progress = Instant::now();
-    let mut progress_seen = health.last_success_ms();
+    let mut progress_seen = health.last_progress_ms.load(Ordering::Relaxed);
     let mut stall_check = interval((stall_timeout / 4).max(Duration::from_millis(50)));
     stall_check.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -267,7 +310,7 @@ async fn run_session(
         tokio::select! {
             err = &mut session => return Some(err),
             _ = stall_check.tick() => {
-                let seen = health.last_success_ms();
+                let seen = health.last_progress_ms.load(Ordering::Relaxed);
                 if seen != progress_seen {
                     progress_seen = seen;
                     last_progress = Instant::now();
@@ -314,27 +357,53 @@ async fn poll_device(
             return err;
         }
     };
+    let schedule = &config.actor.models;
+    let discovered: Vec<u16> = models.iter().map(|model| model.id).collect();
+    let models: Vec<ModelDefinition> = models
+        .into_iter()
+        .filter(|model| schedule.polls(model.id))
+        .collect();
     info!(
         device = %device,
         base,
-        models = ?models.iter().map(|model| model.id).collect::<Vec<_>>(),
+        models = ?discovered,
+        polled = ?models.iter().map(|model| model.id).collect::<Vec<_>>(),
+        slow = ?models
+            .iter()
+            .filter_map(|model| schedule.interval(model.id).map(|every| (model.id, every)))
+            .collect::<Vec<_>>(),
         "discovered SunSpec models"
     );
-    if models.is_empty() {
+    if discovered.is_empty() {
         return PollerError::MalformedChain("no models before the end marker");
+    }
+    if models.is_empty() {
+        return PollerError::NothingToPoll(discovered);
     }
 
     let offset = Duration::from_millis(device_hash(identity) % (config.actor.jitter_ms + 1));
     let mut ticker = interval_at(Instant::now() + offset, config.actor.poll_interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut failed_cycles = 0u32;
+    // When each slow model is next due; `None` (every model at first) means now.
+    let mut next_due: Vec<Option<Instant>> = vec![None; models.len()];
 
     loop {
-        ticker.tick().await;
+        // The scheduled tick, not the wake-up time, so slow intervals stay aligned
+        // with the poll schedule.
+        let tick = ticker.tick().await;
+        let due: Vec<usize> = (0..models.len())
+            .filter(|&index| next_due[index].is_none_or(|due| tick >= due))
+            .collect();
+        if due.is_empty() {
+            health.record_idle_cycle();
+            continue;
+        }
         let started = Instant::now();
         let mut cycle_failed = false;
 
-        for model in &models {
+        for index in due {
+            let model = &models[index];
             match client
                 .read_range(identity.unit_id, model.start, model.length)
                 .await
@@ -342,6 +411,8 @@ async fn poll_device(
                 Ok(registers) => {
                     health.record_success(&device);
                     *polled = true;
+                    // A failed read stays due, so it is retried on the next cycle.
+                    next_due[index] = schedule.interval(model.id).map(|every| tick + every);
                     counter!("sunspec_poll_success_total", "device" => device.clone()).increment(1);
                     // Decode at the edge so consumers get scaled, named points.
                     let points = decode_model(model.id, &registers).unwrap_or_default();
@@ -462,6 +533,21 @@ mod tests {
         assert!(third >= base * 4 && third < base * 4 + Duration::from_millis(401));
         let capped = respawn_delay(base, 30, 7);
         assert!(capped >= MAX_RESPAWN_DELAY && capped <= MAX_RESPAWN_DELAY * 11 / 10);
+    }
+
+    #[test]
+    fn model_schedule_applies_include_then_exclude() {
+        let mut schedule = ModelSchedule::default();
+        assert!(schedule.polls(1) && schedule.polls(103));
+        schedule.exclude = BTreeSet::from([1]);
+        assert!(!schedule.polls(1) && schedule.polls(103));
+        schedule.include = Some(BTreeSet::from([1, 160]));
+        assert!(!schedule.polls(1), "exclude wins");
+        assert!(!schedule.polls(103), "not included");
+        assert!(schedule.polls(160));
+        schedule.intervals = BTreeMap::from([(120, Duration::from_secs(3600))]);
+        assert_eq!(schedule.interval(120), Some(Duration::from_secs(3600)));
+        assert_eq!(schedule.interval(103), None);
     }
 
     #[test]

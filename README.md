@@ -27,6 +27,9 @@ dropped (and counted) instead of growing the buffer without limit.
   shutdown, so devices that are offline at startup are picked up when they come online.
 - **Stall detection**: a session with no successful read for `poller.stall_timeout_ms` (default
   the larger of 10 poll intervals and 30 s) is aborted and restarted.
+- **Polling profiles**: read slow-changing models less often (`poller.model_intervals_s`, e.g.
+  nameplate hourly), choose which models are polled (`include_models`, `exclude_models`), and
+  override the poll interval, request timeout, base address and batch size per static device.
 - **Edge decoding**: bundled official SunSpec definitions for models 1, 101-103, 111-113, 120-124,
   160, 201-204, 701-713 (IEEE 1547-2018 DER) and 802. Scale factors are applied, "not implemented"
   values become null, strings are trimmed, and repeating groups are named `group[i].Point`
@@ -170,6 +173,7 @@ The settings most deployments change:
 | `discovery.subnet` | `SUNSPEC_SUBNET` | `192.168.1.0/24` |
 | `discovery.port` / `modbus.port` | `SUNSPEC_PORT` | `502` |
 | `poller.poll_interval_ms` | `SUNSPEC_POLL_INTERVAL_MS` | `1000` |
+| `poller.model_intervals_s` | `SUNSPEC_MODEL_INTERVALS_S` (`1=3600,120=3600`) | none (every model every cycle) |
 | `buffer.path` | `SUNSPEC_BUFFER_PATH` | `sunspec-buffer.sqlite` in the working directory (`/app/data` in Docker) |
 | `kafka.brokers` | `SUNSPEC_KAFKA_BROKERS` | none (records are only logged) |
 | `kafka.topic` | `SUNSPEC_KAFKA_TOPIC` | `sunspec.telemetry` |
@@ -178,6 +182,10 @@ The settings most deployments change:
 TLS (including mutual TLS) and SASL PLAIN or SCRAM authentication are configured with the
 `kafka.ssl_*` and `kafka.sasl_*` keys. Passwords can be read from files (`*_password_file`), which
 works with Docker secrets and systemd credentials; the compose stack authenticates this way.
+
+Static devices in a config file can override the poll interval, request timeout, base address,
+batch size and model selection per device; see
+[Polling profiles](docs/configuration.md#polling-profiles).
 
 Logging is set with `RUST_LOG` (default `info`) and `SUNSPEC_LOG_FORMAT=text|json`.
 
@@ -287,7 +295,7 @@ build files change. See [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) for d
 - No Schema Registry integration; records use fingerprint-based single-object encoding instead.
 - Point metadata (units, labels) is not in the payload; consumers look it up by model and point
   name in the bundled definitions.
-- No configuration reload (SIGHUP) and no per-device polling profiles.
+- No configuration reload (SIGHUP).
 - Enum and bitfield points are published as integers, not expanded to names.
 - Delivery is at-least-once, so duplicates are possible after a crash.
 

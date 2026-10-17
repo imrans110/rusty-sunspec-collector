@@ -327,7 +327,7 @@ startup with `Error: bind metrics port <port>` and the operating-system error.
 |--------|------|--------|---------|
 | `sunspec_poll_success_total` | counter | `device` | Successful model reads. |
 | `sunspec_poll_errors_total` | counter | `device`, `kind` | Failed Modbus operations: connects at session start, reads during model discovery, and model reads during polling. `kind`: `exception`, `timeout`, `transport`, `connect`, `address`. |
-| `sunspec_poll_duration_seconds` | histogram | `device` | Time to read every model of a device once (one poll cycle). |
+| `sunspec_poll_duration_seconds` | histogram | `device` | Time to read the models due in one poll cycle; cycles with nothing due are not recorded. |
 | `sunspec_device_up` | gauge | `device` | 0 from the moment the device's poller starts; 1 from the first successful read of a session until the session ends, then 0 again. |
 | `sunspec_device_last_success_timestamp_seconds` | gauge | `device` | Unix time of the last successful read. |
 | `sunspec_poller_restarts_total` | counter | `device` | Device sessions that ended with an error and were scheduled for retry. |
@@ -567,6 +567,7 @@ level while a broker is unreachable.
 | `SunSpec model chain is malformed: ...` | The model headers do not form a valid chain ending in `0xFFFF`. |
 | `10 consecutive poll cycles failed` | Reads keep failing after discovery; check `sunspec_poll_errors_total{kind}`. Devices that reject large reads need a lower `modbus.max_batch_size`. |
 | `no successful read for ...` | Stall detection; see [Stalls](#stalls). |
+| `none of the discovered models [...] is selected for polling` | `include_models` / `exclude_models` (global or on the device entry) leave nothing to poll on this device. The list shows the models it has. |
 
 If the `modbus read failed` lines before a session ends show
 `device returned modbus exception: Gateway target device failed to respond`, a gateway answered
@@ -604,7 +605,9 @@ rate(sunspec_uplink_records_total[5m])    # records out
   retention starts dropping it (`sunspec_buffer_dropped_total{reason="max_rows"|"max_age"}`).
 - Kafka up but slow: check `sunspec_uplink_publish_seconds`. Each batch waits for the producer's
   50 ms linger plus the broker round trip, so a larger `buffer.batch_size` raises throughput.
-- More data than expected: every model of every device produces one row per poll interval. See
+- More data than expected: every polled model of every device produces one row per poll interval.
+  Read slow-changing models less often or skip unneeded ones with a
+  [polling profile](configuration.md#polling-profiles); see also
   [Sizing](buffer_maintenance.md#sizing).
 
 ### Stalls

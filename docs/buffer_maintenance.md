@@ -170,13 +170,17 @@ disk).
 
 ### Rows per second
 
-Every model of every device produces one row per poll interval:
+Every polled model of every device produces one row per poll interval, and a model with a
+[polling profile](configuration.md#polling-profiles) interval one row per interval:
 
 ```
-rows per second = devices × models per device ÷ poll interval in seconds
+rows per second = devices × (models polled every cycle ÷ poll interval in seconds
+                             + Σ 1 ÷ slow model interval in seconds)
 ```
 
-The `discovered SunSpec models` log line lists the models of each device.
+The `discovered SunSpec models` log line lists each device's models, the ones it polls and the
+slow ones. For example, a device with models 1, 103, 120, 121 and 160, polled every second with
+1 and 120 hourly and 121 every 10 minutes, produces about 2 rows per second instead of 5.
 
 ### Bytes per row
 

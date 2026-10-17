@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Polling profiles: `poller.model_intervals_s` reads slow-changing models (for example common, nameplate and settings) at most once per interval instead of every cycle, and `poller.include_models` / `poller.exclude_models` choose which discovered models are polled (env `SUNSPEC_MODEL_INTERVALS_S`, `SUNSPEC_INCLUDE_MODELS`, `SUNSPEC_EXCLUDE_MODELS`). Cycles with nothing due do not contact the device and do not count as stalls
+- Per-device settings on `[[discovery.static_devices]]` entries: `poll_interval_ms`, `request_timeout_ms`, `base_address`, `max_batch_size`, `include_models`, `exclude_models` and `model_intervals_s` (merged model by model with the global intervals)
+- `SimHandle::reads_at(unit, addr)` in `sunspec-sim`, counting read requests per start address
+
+### Changed
+- **Breaking:** a static device listed twice (same host and unit ID) is now a config error instead of being polled once
+- `sunspec_poll_duration_seconds` is recorded only for cycles that read at least one model
+
 ## [0.2.0] - 2026-10-17
 
 ### Upgrade notes

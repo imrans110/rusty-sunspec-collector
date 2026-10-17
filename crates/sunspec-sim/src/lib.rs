@@ -156,6 +156,8 @@ struct Inner {
     stalled: AtomicBool,
     connections: AtomicU64,
     requests: AtomicU64,
+    /// Read requests per (unit ID, start address), for tests of polling schedules.
+    reads: Mutex<HashMap<(u8, u16), u64>>,
     /// Bumped to drop every open connection.
     drop_tx: watch::Sender<u64>,
     /// `true` while the listener should accept connections.
@@ -187,6 +189,7 @@ pub async fn start(config: SimConfig, bind: SocketAddr) -> io::Result<SimHandle>
             stalled: AtomicBool::new(false),
             connections: AtomicU64::new(0),
             requests: AtomicU64::new(0),
+            reads: Mutex::new(HashMap::new()),
             drop_tx,
             online_tx,
         }),
@@ -288,6 +291,13 @@ impl SimHandle {
 
     pub fn requests_served(&self) -> u64 {
         self.inner.requests.load(Ordering::SeqCst)
+    }
+
+    /// Read requests for `unit_id` starting at `addr`. For a model start this includes
+    /// the collector's discovery read of the model header.
+    pub fn reads_at(&self, unit_id: u8, addr: u16) -> u64 {
+        let reads = self.inner.reads.lock().expect("sim state poisoned");
+        reads.get(&(unit_id, addr)).copied().unwrap_or(0)
     }
 
     fn read(&self, unit_id: u8, start: u16, count: u16) -> Result<Vec<u16>, u8> {
@@ -412,6 +422,13 @@ fn respond(handle: &SimHandle, unit_id: u8, pdu: &[u8]) -> Vec<u8> {
     if count == 0 || count > MAX_REGISTERS_PER_READ {
         return vec![function | 0x80, EX_ILLEGAL_DATA_VALUE];
     }
+    *handle
+        .inner
+        .reads
+        .lock()
+        .expect("sim state poisoned")
+        .entry((unit_id, start))
+        .or_insert(0) += 1;
     match handle.read(unit_id, start, count) {
         Ok(values) => {
             let mut response = Vec::with_capacity(2 + values.len() * 2);

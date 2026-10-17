@@ -25,7 +25,7 @@ simulator used by the tests and the Docker Compose stack.
 2. **Per-device poller.** Each device runs in its own supervised task. A session connects, finds
    the `SunS` marker (configured base address first, then 40000, 0 and 50000), reads the model
    headers one at a time until the end marker, and then reads and decodes every model once per
-   poll interval. A failed or stalled session is restarted with exponential backoff, capped at
+   poll interval (or less often, for models given a slower interval in a polling profile). A failed or stalled session is restarted with exponential backoff, capped at
    60 s.
 3. **Channel and ingest.** Samples go through a bounded channel to the ingest task, which writes
    them to SQLite in transactions of up to 256 rows. If the channel stays full for a poll
@@ -115,8 +115,7 @@ Compose stack is running.
 - No Schema Registry integration; records use fingerprint-based single-object encoding.
 - Point units and labels are not in the payload; look them up by model and point name in the
   bundled SunSpec definitions.
-- No configuration reload and no per-device polling profiles; enum and bitfield points are
-  published as integers.
+- No configuration reload; enum and bitfield points are published as integers.
 - Delivery is at-least-once, so duplicates are possible after a crash.
 
 ---
