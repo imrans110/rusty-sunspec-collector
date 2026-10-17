@@ -5,9 +5,9 @@ use tokio::sync::watch;
 use tokio::time::{sleep, timeout};
 use tracing::{debug, info, warn};
 
-use avro_kafka::Publisher;
+use avro_kafka::{PublishError, Publisher};
 use buffer::BufferStore;
-use poller_actor::PollSample;
+use poller_actor::Sample;
 
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
@@ -82,8 +82,9 @@ fn next_delay(failures: u32, backlog: bool, drain_interval: Duration) -> Duratio
     }
 }
 
-/// Publishes one batch. Returns how many rows were processed (published or discarded
-/// as corrupt); rows stay buffered when publishing fails.
+/// Publishes one batch, one Kafka record per sample. Returns how many rows were
+/// processed (acknowledged by Kafka, or discarded because they can never be sent).
+/// Rows Kafka did not acknowledge stay buffered and are retried first next time.
 async fn drain_once(
     buffer: &BufferStore,
     publisher: &Publisher,
@@ -97,17 +98,37 @@ async fn drain_once(
     }
 
     let mut samples = Vec::with_capacity(batch.len());
-    let mut valid_ids = Vec::with_capacity(batch.len());
+    let mut sample_ids = Vec::with_capacity(batch.len());
     let mut corrupt_ids = Vec::new();
     for message in &batch {
-        match serde_json::from_slice::<PollSample>(&message.payload) {
+        match serde_json::from_slice::<Sample>(&message.payload) {
             Ok(sample) => {
                 samples.push(sample);
-                valid_ids.push(message.id);
+                sample_ids.push(message.id);
             }
             Err(err) => {
                 warn!(id = message.id, error = %err, "corrupt buffered sample, discarding");
                 corrupt_ids.push(message.id);
+            }
+        }
+    }
+
+    let started = Instant::now();
+    let results = publisher.publish(&samples).await;
+    let mut acked = Vec::with_capacity(samples.len());
+    let mut undelivered = 0usize;
+    let mut last_error = None;
+    for (id, result) in sample_ids.into_iter().zip(results) {
+        match result {
+            Ok(()) => acked.push(id),
+            // Encoding failures are deterministic: retrying can never succeed.
+            Err(err @ (PublishError::Avro(_) | PublishError::Schema(_))) => {
+                warn!(id, error = %err, "sample cannot be encoded, discarding");
+                corrupt_ids.push(id);
+            }
+            Err(err) => {
+                undelivered += 1;
+                last_error = Some(err);
             }
         }
     }
@@ -120,31 +141,27 @@ async fn drain_once(
             warn!(error = %err, "deleting corrupt rows failed");
         }
     }
-    if samples.is_empty() {
-        return Ok(batch.len());
+    if !acked.is_empty() {
+        histogram!("uplink_publish_latency").record(started.elapsed());
+        counter!("uplink_messages_sent").increment(acked.len() as u64);
+        // Delete only what Kafka acknowledged (at-least-once delivery).
+        if let Err(err) = buffer.delete_batch(&acked).await {
+            warn!(error = %err, "deleting published rows failed; they may be sent again");
+        }
     }
-
-    let payload = publisher.serialize_batch(&samples).map_err(|err| {
-        warn!(error = %err, "avro batch serialization failed");
-        counter!("uplink_publish_error").increment(1);
-    })?;
-    let started = Instant::now();
-    publisher
-        .publish_bytes(publisher.topic(), &payload)
-        .await
-        .map_err(|err| {
-            warn!(error = %err, "uplink publish failed; rows stay buffered");
-            counter!("uplink_publish_error").increment(1);
-        })?;
-    histogram!("uplink_publish_latency").record(started.elapsed());
-    counter!("uplink_messages_sent").increment(samples.len() as u64);
-
-    // Acknowledge only after Kafka accepted the batch (at-least-once delivery).
-    if let Err(err) = buffer.delete_batch(&valid_ids).await {
-        warn!(error = %err, "deleting published rows failed; they may be sent again");
+    if let Some(err) = last_error {
+        counter!("uplink_publish_error").increment(undelivered as u64);
+        warn!(undelivered, error = %err, "records not delivered; they stay buffered");
+        if acked.is_empty() {
+            return Err(());
+        }
     }
-    debug!(rows = batch.len(), "uplink batch published");
-    Ok(batch.len())
+    debug!(
+        rows = batch.len(),
+        acked = acked.len(),
+        "uplink batch processed"
+    );
+    Ok(acked.len() + corrupt_ids.len())
 }
 
 #[cfg(test)]

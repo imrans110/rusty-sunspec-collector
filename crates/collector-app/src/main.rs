@@ -8,6 +8,10 @@ use collector_app::CollectorConfig;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if env::args().any(|arg| arg == "--print-schema") {
+        println!("{}", avro_kafka::SCHEMA_JSON);
+        return Ok(());
+    }
     tracing_subscriber::fmt::init();
 
     // Install signal handlers first so a stop during startup is still graceful.

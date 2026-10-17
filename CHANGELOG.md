@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Edge decoding with the official SunSpec model definitions (models 1, 101–103, 111–113, 120–124, 160, 201–204, 802, bundled from github.com/sunspec/models under Apache-2.0): scale factors applied, "not implemented" sentinels mapped to null, strings trimmed, repeating groups named `group[i].Point`
+- `collector-app --print-schema` prints the Avro schema of published records (`crates/avro-kafka/schemas/sunspec_sample.avsc`)
+- `sunspec-sim` writes named points and runs a live demo (changing power, current, voltage, frequency and energy) in the binary
 - Buffer retention: `buffer.max_rows` (default 1,000,000) and `buffer.max_age_s` (default 7 days) bound the buffer during long uplink outages; dropped rows are counted in `sunspec_buffer_dropped_total{reason}`, with `sunspec_buffer_rows` and `sunspec_buffer_oldest_age_seconds` gauges
 - `buffer.shutdown_drain_timeout_ms` (default 5 s): on stop, the uplink keeps draining to Kafka for up to this long after ingest has persisted everything
 - Per-device supervision: each device runs connect → discover → poll and is retried with exponential backoff (capped at 60 s) until shutdown, so devices that are offline at startup are picked up when they appear
@@ -46,6 +49,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed unused `retry_count` column from buffer schema
 
 ### Changed
+- **Breaking:** Kafka records are now one Avro single-object message per sample (schema v2, `com.rusty.sunspec.v2.SunspecSample`), keyed by `host/unit_id`, with `content-type` and `schema-fingerprint` headers. Previously each message was an Avro container file mixing devices, with the schema embedded and no key. Records carry decoded `points` alongside the raw `registers`
+- **Breaking:** `model_name` uses the official SunSpec names (e.g. `inverter_three_phase` instead of `three_phase_inverter`)
+- Only records Kafka acknowledges are deleted from the buffer; undelivered records stay buffered and are retried first, and records that cannot be encoded are discarded and counted
+- The producer lingers 50 ms so records to the same partition are batched and compressed together
 - Samples are written to SQLite in transactions of up to 256 rows (one fsync per batch instead of per sample), reducing flash wear
 - Delivery is documented as at-least-once: rows are deleted only after Kafka acknowledges them, so a crash between publish and delete can produce duplicates
 - `sunspec.discovery_register_count` / `SUNSPEC_DISCOVERY_REG_COUNT` are deprecated and ignored (a warning is logged)
@@ -62,6 +69,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `rustfmt.toml` expanded with `max_width`, `reorder_imports`, `reorder_modules`
 - sqlx 0.7 → 0.8, built with only the `sqlite` and `runtime-tokio` features (no TLS stack or unused MySQL/Postgres drivers)
 - quick-xml 0.31 → 0.42
+
+### Removed
+- Unused model-catalog code in `sunspec-parser` (the id/name/length JSON and XML parsers, `ModelCatalog`, `apply_scale`); the decoder and bundled definitions replace them
 
 ### Security
 - Resolved all `cargo audit` vulnerabilities: RUSTSEC-2024-0363 (sqlx), RUSTSEC-2023-0071 (rsa, via the unused sqlx MySQL driver), RUSTSEC-2026-0346/0349 (rustls 0.21), RUSTSEC-2026-0098/0099/0104 (rustls-webpki 0.101), RUSTSEC-2026-0194/0195 (quick-xml), RUSTSEC-2026-0007 (bytes), RUSTSEC-2026-0204 (crossbeam-epoch)

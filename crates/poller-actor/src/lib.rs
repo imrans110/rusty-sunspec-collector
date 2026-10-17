@@ -8,14 +8,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use metrics::{counter, gauge, histogram};
 use modbus_client::{ClientConfig, ClientError, ModbusClient};
-use serde::{Deserialize, Serialize};
-use sunspec_parser::{model_name, ModelDefinition, SUNSPEC_END_ID, SUNSPEC_ID};
+use sunspec_parser::{decode_model, model_name, ModelDefinition, SUNSPEC_END_ID, SUNSPEC_ID};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendTimeoutError;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{interval, interval_at, sleep, Instant, MissedTickBehavior};
 use tracing::{debug, info, warn};
 use types::DeviceIdentity;
+pub use types::Sample;
 
 /// Base addresses the SunSpec specification allows, in the order it recommends probing.
 pub const STANDARD_BASE_ADDRESSES: [u16; 3] = [40_000, 0, 50_000];
@@ -85,16 +85,6 @@ pub enum PollerError {
     Stalled(Duration),
     #[error("telemetry channel closed")]
     ChannelClosed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PollSample {
-    pub device: DeviceIdentity,
-    pub model_id: u16,
-    pub model_name: String,
-    pub start: u16,
-    pub registers: Vec<u16>,
-    pub collected_at_ms: u64,
 }
 
 /// Lock-free view of one device's state, shared with metrics and health reporting.
@@ -206,7 +196,7 @@ pub fn base_candidates(preferred: u16) -> Vec<u16> {
 /// when a session fails or stalls, it is retried with exponential backoff.
 pub async fn run_device(
     config: DeviceConfig,
-    sender: mpsc::Sender<PollSample>,
+    sender: mpsc::Sender<Sample>,
     mut shutdown: watch::Receiver<bool>,
     health: Arc<DeviceHealth>,
 ) {
@@ -258,7 +248,7 @@ pub async fn run_device(
 /// Returns `None` on shutdown, otherwise the reason the session ended.
 async fn run_session(
     config: &DeviceConfig,
-    sender: &mpsc::Sender<PollSample>,
+    sender: &mpsc::Sender<Sample>,
     shutdown: &mut watch::Receiver<bool>,
     health: &DeviceHealth,
     polled: &mut bool,
@@ -295,7 +285,7 @@ async fn run_session(
 /// Polls until something fails; never returns on success.
 async fn poll_device(
     config: &DeviceConfig,
-    sender: &mpsc::Sender<PollSample>,
+    sender: &mpsc::Sender<Sample>,
     health: &DeviceHealth,
     polled: &mut bool,
 ) -> PollerError {
@@ -343,13 +333,16 @@ async fn poll_device(
                     health.record_success(&device);
                     *polled = true;
                     counter!("sunspec_poll_success_total", "device" => device.clone()).increment(1);
-                    let sample = PollSample {
+                    // Decode at the edge so consumers get scaled, named points.
+                    let points = decode_model(model.id, &registers).unwrap_or_default();
+                    let sample = Sample {
                         device: identity.clone(),
                         model_id: model.id,
                         model_name: model.name.clone(),
                         start: model.start,
                         registers,
                         collected_at_ms: unix_ms(),
+                        points,
                     };
                     // Never block polling for long on a full channel; drop and count.
                     match sender

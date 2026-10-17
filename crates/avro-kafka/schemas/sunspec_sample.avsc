@@ -1,0 +1,37 @@
+{
+  "type": "record",
+  "name": "SunspecSample",
+  "namespace": "com.rusty.sunspec.v2",
+  "doc": "One SunSpec model read from one device and decoded at the edge. Published as one Kafka record per sample using Avro single-object encoding, keyed by device_key.",
+  "fields": [
+    {
+      "name": "device_key",
+      "type": "string",
+      "doc": "host/unit_id, e.g. 192.168.1.20/1. Also the Kafka record key."
+    },
+    { "name": "ip", "type": "string", "doc": "Device host (IP address or hostname)." },
+    { "name": "unit_id", "type": "int", "doc": "Modbus unit ID." },
+    { "name": "model_id", "type": "int", "doc": "SunSpec model ID, e.g. 103." },
+    {
+      "name": "model_name",
+      "type": "string",
+      "doc": "SunSpec model name, e.g. inverter_three_phase, or model_<id> when unknown."
+    },
+    { "name": "start", "type": "int", "doc": "Register address of the model header." },
+    {
+      "name": "collected_at_ms",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "When the registers were read."
+    },
+    {
+      "name": "points",
+      "type": { "type": "map", "values": ["null", "double", "long", "string"] },
+      "doc": "Decoded points by SunSpec name: scale factors applied (double), integers for enums, bitfields and unscaled counts (long), strings trimmed, null when the device marks a point as not implemented. Repeating groups are named group[i].Point. Empty for models without a bundled definition."
+    },
+    {
+      "name": "registers",
+      "type": { "type": "array", "items": "int" },
+      "doc": "Raw registers, including the two header registers."
+    }
+  ]
+}

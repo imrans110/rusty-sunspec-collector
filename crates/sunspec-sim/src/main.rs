@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use sunspec_sim::{parse_models, SimConfig, UnitSpec, Unmapped};
 
 const USAGE: &str =
-    "usage: sunspec-sim [--bind ADDR:PORT] [--units 1,2] [--models 1:66,103:50] [--base 40000]";
+    "usage: sunspec-sim [--bind ADDR:PORT] [--units 1,2] [--models 1,103,160:48] [--base 40000]";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -25,6 +25,7 @@ async fn main() -> ExitCode {
         }
     };
     println!("sunspec-sim listening on {}", handle.local_addr());
+    sunspec_sim::run_demo(handle.clone(), config.unit_ids);
 
     wait_for_shutdown().await;
     ExitCode::SUCCESS
@@ -33,12 +34,13 @@ async fn main() -> ExitCode {
 struct Args {
     bind: SocketAddr,
     sim: SimConfig,
+    unit_ids: Vec<u8>,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut bind: SocketAddr = "0.0.0.0:1502".parse().expect("valid default address");
     let mut units = vec![1u8];
-    let mut models = parse_models("1:66,103:50")?;
+    let mut models = parse_models("1,103,120,160:48")?;
     let mut base = 40_000u16;
 
     let mut args = env::args().skip(1);
@@ -68,6 +70,7 @@ fn parse_args() -> Result<Args, String> {
         }
     }
 
+    let unit_ids = units.clone();
     let units = units
         .into_iter()
         .map(|unit_id| UnitSpec {
@@ -82,6 +85,7 @@ fn parse_args() -> Result<Args, String> {
             units,
             unmapped: Unmapped::Exception,
         },
+        unit_ids,
     })
 }
 

@@ -87,24 +87,37 @@ impl SimConfig {
     }
 }
 
-/// Parses a model chain such as `1:66,103:50,160:48`.
+/// Parses a model chain such as `1,103,160:48`. A bare ID uses the body length of the
+/// bundled SunSpec definition; `id:len` sets it explicitly (e.g. to size repeating
+/// groups such as MPPT modules).
 pub fn parse_models(spec: &str) -> Result<Vec<ModelSpec>, String> {
     spec.split(',')
         .filter(|entry| !entry.trim().is_empty())
         .map(|entry| {
-            let (id, len) = entry
-                .trim()
-                .split_once(':')
-                .ok_or_else(|| format!("model '{entry}' must be id:len"))?;
-            let id = id
+            let entry = entry.trim();
+            let (id, len) = match entry.split_once(':') {
+                Some((id, len)) => (id, Some(len)),
+                None => (entry, None),
+            };
+            let id: u16 = id
                 .parse()
                 .map_err(|_| format!("invalid model id in '{entry}'"))?;
-            let len = len
-                .parse()
-                .map_err(|_| format!("invalid model length in '{entry}'"))?;
+            let len = match len {
+                Some(len) => len
+                    .parse()
+                    .map_err(|_| format!("invalid model length in '{entry}'"))?,
+                None => default_body_len(id)
+                    .ok_or_else(|| format!("model {id} has no bundled definition; use {id}:len"))?,
+            };
             Ok(ModelSpec { id, len })
         })
         .collect()
+}
+
+/// Body length (excluding the 2 header registers) of a bundled model definition.
+pub fn default_body_len(model_id: u16) -> Option<u16> {
+    let model = sunspec_parser::model_definition(model_id)?;
+    u16::try_from(model.group.fixed_size().checked_sub(2)?).ok()
 }
 
 #[derive(Debug, Default)]
@@ -210,6 +223,37 @@ impl SimHandle {
             unit.registers
                 .insert(addr.wrapping_add(offset as u16), *value);
         }
+    }
+
+    /// Writes a top-level point of a model by name (raw registers, big-endian words).
+    /// Returns `false` if the unit, model or point does not exist.
+    pub fn set_point(&self, unit_id: u8, model_id: u16, point: &str, values: &[u16]) -> bool {
+        let Some(start) = self.model_start(unit_id, model_id) else {
+            return false;
+        };
+        let Some((offset, _)) =
+            sunspec_parser::model_definition(model_id).and_then(|model| model.point_offset(point))
+        else {
+            return false;
+        };
+        self.set_registers(unit_id, start.wrapping_add(offset), values);
+        true
+    }
+
+    /// Writes a string point, NUL-padded to its size.
+    pub fn set_text(&self, unit_id: u8, model_id: u16, point: &str, value: &str) -> bool {
+        let Some((_, def)) =
+            sunspec_parser::model_definition(model_id).and_then(|model| model.point_offset(point))
+        else {
+            return false;
+        };
+        let mut bytes = value.as_bytes().to_vec();
+        bytes.resize(usize::from(def.size) * 2, 0);
+        let words: Vec<u16> = bytes
+            .chunks(2)
+            .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+            .collect();
+        self.set_point(unit_id, model_id, point, &words)
     }
 
     /// While stalled, requests are read but never answered.
@@ -380,4 +424,51 @@ fn respond(handle: &SimHandle, unit_id: u8, pdu: &[u8]) -> Vec<u8> {
         }
         Err(code) => vec![function | 0x80, code],
     }
+}
+
+/// Fills plausible nameplate data and scale factors, then updates live inverter values
+/// once per second until the simulator is dropped. Used by the `sunspec-sim` binary.
+pub fn run_demo(handle: SimHandle, unit_ids: Vec<u8>) {
+    for &unit in &unit_ids {
+        handle.set_text(unit, 1, "Mn", "Rusty SunSpec");
+        handle.set_text(unit, 1, "Md", "SIM-10K");
+        handle.set_text(unit, 1, "SN", &format!("SIM{unit:05}"));
+        handle.set_point(unit, 1, "DA", &[u16::from(unit)]);
+        for (point, exponent) in [
+            ("A_SF", -2i16),
+            ("V_SF", -1),
+            ("W_SF", 0),
+            ("Hz_SF", -2),
+            ("WH_SF", 0),
+        ] {
+            handle.set_point(unit, 103, point, &[exponent as u16]);
+        }
+    }
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
+        let mut energy_wh = 1_000_000u32;
+        let mut seconds = 0u32;
+        loop {
+            tick.tick().await;
+            seconds = seconds.wrapping_add(1);
+            for &unit in &unit_ids {
+                // A slow sine-like ramp so dashboards show movement.
+                let phase = (seconds % 120) as f64 / 120.0 * std::f64::consts::TAU;
+                let watts = (5_000.0 + 2_000.0 * phase.sin() + f64::from(unit) * 100.0) as u16;
+                let amps_centi = (f64::from(watts) / 230.0 / 3.0 * 100.0) as u16;
+                handle.set_point(unit, 103, "W", &[watts]);
+                handle.set_point(unit, 103, "A", &[amps_centi]);
+                handle.set_point(unit, 103, "PhVphA", &[2301 + (seconds % 7) as u16]);
+                handle.set_point(unit, 103, "Hz", &[5000 + (seconds % 5) as u16]);
+                handle.set_point(unit, 103, "St", &[4]);
+                energy_wh = energy_wh.wrapping_add(u32::from(watts) / 3_600 + 1);
+                handle.set_point(
+                    unit,
+                    103,
+                    "WH",
+                    &[(energy_wh >> 16) as u16, energy_wh as u16],
+                );
+            }
+        }
+    });
 }
