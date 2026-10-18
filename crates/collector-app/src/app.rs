@@ -10,7 +10,7 @@ use tracing::info;
 use avro_kafka::{KafkaConfig, Publisher};
 use buffer::BufferStore;
 
-use crate::config::CollectorConfig;
+use crate::config::{CollectorConfig, ConfigError};
 use crate::health::Health;
 use crate::uplink::UplinkConfig;
 use crate::{devices, ingest, metrics_server, retention, systemd, uplink};
@@ -132,5 +132,5 @@ fn build_publisher(config: &CollectorConfig) -> Result<Publisher> {
             .unwrap_or(defaults.enable_idempotence),
         security: config.kafka_security.clone(),
     };
-    Publisher::new_kafka(topic, kafka_config).context("kafka publisher init failed")
+    Publisher::new_kafka(topic, kafka_config).context(ConfigError("kafka publisher init failed"))
 }

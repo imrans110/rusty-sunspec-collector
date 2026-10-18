@@ -104,7 +104,8 @@ sunspec-sim -- sunspec-parser
 3. Installs the SIGINT/SIGTERM handler before loading the configuration, so a stop during startup
    still takes the graceful path.
 4. Loads the configuration (defaults, then the config file, then `SUNSPEC_*` variables) and
-   validates it. Any error ends the process with a non-zero exit code.
+   validates it. Any error ends the process with exit status 78 (`EX_CONFIG`), which the systemd
+   unit does not restart on (`RestartPreventExitStatus=78`); other startup errors exit with 1.
 5. Installs the Prometheus recorder and calls `collector_app::run`.
 
 `collector_app::run` builds the publisher (Kafka when `kafka.brokers` is set, otherwise a sink that
@@ -406,6 +407,12 @@ Scheduling:
 - When the backlog is empty, the uplink waits `buffer.drain_interval_ms` (default 500 ms).
 - When the dequeue fails or no record of a batch is acknowledged, it backs off 1 s x 2^(n-1), up
   to 30 s (never less than the drain interval).
+- When every record of the batch timed out and a broker connection has failed since the last
+  delivery, the brokers are taken to be unreachable: the backoff asks them for the topic's metadata
+  every 2 s (1 s timeout) and ends as soon as they answer, so a backlog starts draining within
+  seconds of an outage ending. Rejected records keep the full backoff.
+- The first batch delivered after failures logs `records delivered again` with the number of
+  failed attempts.
 
 `sunspec_uplink_publish_seconds` records the time to publish a batch and receive its
 acknowledgements.
@@ -460,7 +467,8 @@ The record, its schema, how the schema evolves, how to read records and the prod
 ### Heartbeats and `/healthz`
 
 The ingest and uplink tasks record a heartbeat on every loop iteration: ingest at least every 5 s
-while idle, the uplink at least every 30 s (its longest backoff) plus the time one drain takes.
+while idle, the uplink at least every 30 s (its longest backoff) plus up to 1 s for a broker
+probe and the time one drain takes.
 
 `GET /healthz` on `metrics.port` returns 200 while both heartbeats are younger than 120 s, and 503
 otherwise, with a JSON body:
@@ -518,7 +526,13 @@ table is in [Metrics](reference/metrics.md) and suggested alerts are in
 Logging uses `tracing` with structured fields (`device`, `model_id`, `error`, ...). `RUST_LOG`
 sets the filter (default `info`) and `SUNSPEC_LOG_FORMAT=json` writes one JSON object per line.
 Steady-state operation is quiet at `info`: per-cycle and per-batch messages are at `debug`;
-session failures, dropped samples and undelivered records are warnings.
+session failures, dropped samples and undelivered records are warnings. Expected misses are at
+`debug` too: a base address discovery tries without finding a map, and each failed Modbus attempt
+before a retry (the poller reports the read that finally failed). The Kafka producer has its own
+client context: librdkafka reports every reconnect attempt to a broker that is down (about once a
+second, twice each), so a failed broker connection is logged at warn at most once per 5 minutes
+and the repeats at `debug`. The uplink's `records not delivered` warning (once per backoff) and
+`records delivered again` (info) mark an outage's start and end.
 
 ---
 
@@ -607,13 +621,13 @@ propagated.
 
 | Component | Failure | Recovery |
 |-----------|---------|----------|
-| Modbus request | Timeout, transport or connect error | Retry with backoff on a new connection |
+| Modbus request | Timeout, transport or connect error, or the device closed the connection | Retry with backoff on a new connection |
 | Modbus request | Exception | Not retried (except Server Device Busy); connection kept |
 | Device session | Connect, discovery, 10 failed cycles, stall | Supervisor restarts it with exponential backoff |
 | Sample channel | Full for a poll interval | Sample dropped and counted |
 | Buffer write | SQLite error | Batch dropped and counted (`write_error`) |
 | Buffer row | Not parsable or not encodable | Row deleted and counted (`corrupt`) |
-| Kafka publish | Not acknowledged | Row kept and retried first; uplink backs off when a whole batch fails |
+| Kafka publish | Not acknowledged | Row kept and retried first; uplink backs off when a whole batch fails, ending early once unreachable brokers answer again |
 | Subnet scan | Host unreachable | Host skipped; found on a later rescan |
 | Ingest or uplink | Stuck | `/healthz` returns 503; the systemd watchdog restarts the service |
 

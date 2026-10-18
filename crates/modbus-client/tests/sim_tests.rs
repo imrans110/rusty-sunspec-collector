@@ -97,6 +97,29 @@ async fn reconnects_after_the_connection_drops() {
 }
 
 #[tokio::test]
+async fn a_dropped_connection_reads_as_disconnected() {
+    let sim = simulator().await;
+    let config = ClientConfig {
+        retry_count: 0,
+        ..config(&sim)
+    };
+    let client = ModbusClient::connect(config).await.expect("connect");
+    client.read_range(1, BASE, 2).await.expect("first read");
+
+    sim.drop_connections();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let err = client
+        .read_range(1, BASE, 2)
+        .await
+        .expect_err("read on a closed connection");
+
+    // Not the leftover OS error tokio-modbus reports, such as "os error 36".
+    assert!(matches!(err, ClientError::Disconnected), "got {err:?}");
+    assert_eq!(err.to_string(), "connection closed by the device");
+    assert!(err.is_connection_error());
+}
+
+#[tokio::test]
 async fn timeout_drops_the_connection_and_recovers() {
     let sim = simulator().await;
     let mut config = config(&sim);

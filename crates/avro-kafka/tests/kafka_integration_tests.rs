@@ -32,11 +32,17 @@ async fn publishes_keyed_records_to_kafka() {
     for result in publisher.publish(&[sample.clone(), sample]).await {
         result.expect("delivered");
     }
+    assert!(
+        publisher.probe(std::time::Duration::from_secs(5)).await,
+        "a reachable broker answers the probe"
+    );
 }
 
 /// Run by the CI Docker E2E job after the compose stack (simulator → collector →
 /// Kafka) has published records: everything on the topic must decode, carry the
 /// expected headers, be keyed by its device, and include decoded inverter power.
+/// `SUNSPEC_E2E_DEVICE_HOST` is the host the collector polls (default `simulator`, the
+/// compose service); set it to `127.0.0.1` for a collector polling a local simulator.
 #[tokio::test]
 #[ignore = "needs a broker a running collector publishes to (CI Docker E2E job)"]
 async fn published_records_decode_to_samples() {
@@ -50,6 +56,9 @@ async fn published_records_decode_to_samples() {
         .expect("SUNSPEC_KAFKA_BROKERS must point at a Kafka broker");
     let topic =
         std::env::var("SUNSPEC_KAFKA_TOPIC").unwrap_or_else(|_| "sunspec.telemetry".to_string());
+    let device_host =
+        std::env::var("SUNSPEC_E2E_DEVICE_HOST").unwrap_or_else(|_| "simulator".to_string());
+    let device_prefix = format!("{device_host}/");
     let consumer: StreamConsumer = ClientConfig::new()
         .set("bootstrap.servers", &brokers)
         .set("group.id", format!("e2e-{}", std::process::id()))
@@ -79,7 +88,7 @@ async fn published_records_decode_to_samples() {
             .expect("content-type header");
         assert_eq!(content_type, avro_kafka::CONTENT_TYPE.as_bytes());
 
-        if key.starts_with("simulator/") {
+        if key.starts_with(&device_prefix) {
             collector_records += 1;
             if sample.model_id == 103 {
                 saw_scaled_power |= sample.points.iter().any(|(name, value)| {
@@ -93,7 +102,7 @@ async fn published_records_decode_to_samples() {
     println!("decoded {decoded} records, {collector_records} from the collector");
     assert!(
         collector_records > 0,
-        "no records from the simulator devices"
+        "no records from devices on {device_host}"
     );
     assert!(saw_scaled_power, "no decoded model 103 power reading");
 }

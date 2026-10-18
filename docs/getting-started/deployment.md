@@ -131,6 +131,9 @@ sudoedit /etc/sunspec-collector.env        # devices, Kafka brokers
 sudo systemctl enable --now sunspec-collector
 ```
 
+To run without Kafka (records are then only logged), comment out the `SUNSPEC_KAFKA_BROKERS` line;
+an empty value is a configuration error.
+
 `install.sh` downloads `sunspec-collector-<version>-<target>.tar.gz` and `SHA256SUMS` from the
 release, checks the archive's checksum, and installs:
 
@@ -189,7 +192,8 @@ environment file itself, before dropping privileges.
 |---------|--------|
 | `Type=notify` | systemd marks the service started once the collector has opened the buffer and started its tasks (`READY=1`). |
 | `WatchdogSec=30` | The collector pings the watchdog every 15 s, but only while the pipeline is healthy (the same check as `/healthz`). If ingest or the uplink stops checking in for 120 s, the pings stop and systemd stops the service within 30 s; `Restart=always` starts it again. The log shows `pipeline unhealthy; withholding systemd watchdog ping`. |
-| `Restart=always`, `RestartSec=5` | Restarts after any exit, including a configuration error, every 5 s. |
+| `Restart=always`, `RestartSec=5` | Restarts 5 s after any exit except a configuration error. |
+| `RestartPreventExitStatus=78` | A wrong setting exits with 78 (`EX_CONFIG`) and is not restarted: the service stays failed (`status=78` in `systemctl status`) with the error in the journal. Fix the setting, then `systemctl restart sunspec-collector`. |
 | `TimeoutStopSec=30` | Time allowed for the graceful stop after SIGTERM before SIGKILL. |
 | `DynamicUser=yes` | Runs as a transient unprivileged user; no account needs to be created. |
 | `StateDirectory=sunspec-collector`, `StateDirectoryMode=0750` | systemd creates `/var/lib/sunspec-collector`, owned by the service user, and keeps it across restarts and reboots. With `DynamicUser=yes` the data is stored in `/var/lib/private/sunspec-collector` and `/var/lib/sunspec-collector` is a symlink to it. This is the only writable location. |
@@ -255,11 +259,14 @@ Messages worth knowing:
 | `starting device poller` | info | A device was added (`device=host/unit`). |
 | `discovered SunSpec models` | info | Session started; shows the base address and model IDs found. |
 | `device session ended` | warn | A session failed; `error` gives the reason, `retry_in_ms` the backoff. |
-| `modbus read failed` | warn | One read attempt failed (logged by `modbus_client` and `poller_actor`). |
-| `modbus reconnected` | info | The client reconnected after a transport error or timeout. |
+| `modbus read failed` | warn | A model could not be read after the client's retries (`poller_actor`). Each failed attempt is logged at debug by `modbus_client`. |
+| `modbus connected` | info | The client opened a connection: a shared client's first read, or a reconnect after a transport error or timeout. |
 | `telemetry channel full, sample dropped` | warn | Ingest is not keeping up. |
 | `no devices found` | warn | The device set is empty; subnet mode retries after `rescan_interval_s`. |
 | `records not delivered; they stay buffered` | warn | Kafka did not acknowledge some records. |
+| `Kafka broker connection failed; repeats are logged at debug for 5 minutes` | warn | The Kafka client could not connect to a broker; `reason` names it. Logged at warn at most once per 5 minutes. |
+| `records delivered again` | info | Kafka accepted records after failed attempts (`failed_attempts`); a backlog drains from here. |
+| `Kafka client error` | error | librdkafka reported another error, for example a failed authentication. |
 | `buffer write failed; samples dropped` | warn | SQLite write failed; samples lost. |
 | `buffer retention: dropped rows past max age` | warn | Retention deleted rows older than `buffer.max_age_s`. |
 | `buffer retention: dropped oldest rows over max rows` | warn | Retention deleted rows beyond `buffer.max_rows`. |
@@ -267,5 +274,6 @@ Messages worth knowing:
 | `pipeline unhealthy; withholding systemd watchdog ping` | warn | Ingest or uplink stopped checking in. |
 | `final uplink drain timed out; ...` | warn | Shutdown left rows in the buffer. |
 
-librdkafka also logs broker connection errors (for example `Connect to ipv4#... failed`) at error
-level while a broker is unreachable.
+librdkafka's own log lines use the `librdkafka` target. Its connection failures while a broker is
+down (for example `Connect to ipv4#... failed`) are at debug, since the outage warning above covers
+them.

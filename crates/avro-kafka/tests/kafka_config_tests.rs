@@ -20,6 +20,45 @@ fn default_config_creates_a_producer() {
     assert!(result.is_ok(), "{:?}", result.err());
 }
 
+// librdkafka reports a broker it cannot connect to; the publisher remembers that until the
+// brokers answer again (which the uplink uses to end its backoff early), and probing an
+// unreachable broker fails.
+#[tokio::test]
+async fn an_unreachable_broker_is_reported_and_fails_the_probe() {
+    use std::time::{Duration, Instant};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    drop(listener);
+    let config = KafkaConfig {
+        brokers: format!("127.0.0.1:{port}"),
+        message_timeout_ms: 500,
+        ..Default::default()
+    };
+    let publisher = Publisher::new_kafka("sunspec.telemetry", config).expect("publisher");
+
+    assert!(!publisher.probe(Duration::from_millis(300)).await);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !publisher.brokers_unreachable() {
+        assert!(
+            Instant::now() < deadline,
+            "librdkafka never reported the broker unreachable"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn log_and_memory_publishers_always_answer_the_probe() {
+    let probe = std::time::Duration::from_millis(10);
+    let log = Publisher::new_log("sunspec.telemetry");
+    let (memory, _) = Publisher::new_memory("sunspec.telemetry");
+    for publisher in [log, memory] {
+        assert!(publisher.probe(probe).await);
+        assert!(!publisher.brokers_unreachable());
+    }
+}
+
 fn fixture(name: &str) -> String {
     format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
 }

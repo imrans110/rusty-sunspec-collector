@@ -6,11 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Upgrade notes
+- A wrong setting now exits with status 78 instead of 1. Rerun `install.sh` to get the systemd unit with `RestartPreventExitStatus=78` (an edited unit is saved as `.service.bak`). Scripts or supervisors that check for exit status 1 after a configuration error should accept 78
+
 ### Added
 - The documentation site lists every supported SunSpec model with its points (type, units, label, description and enum and bitfield names), generated from the bundled definitions: Reference → Supported SunSpec models
 
 ### Changed
+- Configuration errors (settings that do not load or validate, an invalid `SUNSPEC_LOG_FORMAT`, Kafka settings the producer rejects) exit with status 78 (`EX_CONFIG`), and the systemd unit does not restart on it (`RestartPreventExitStatus=78`): the service stops once and shows as failed with the error in the journal, instead of restarting every 5 s with the same error. Other startup errors still exit with 1 and are restarted
+- Quieter Kafka outages: librdkafka reported every reconnect attempt to a broker that was down, three error lines about every second. A failed broker connection is now logged at warn at most once per 5 minutes (`Kafka broker connection failed`), with the repeats at debug; librdkafka's other log lines keep their level under the `librdkafka` target, and other client errors are logged as `Kafka client error`. The uplink logs `records delivered again` (info) when an outage ends
+- After a Kafka outage the backlog starts draining within about 2 s of the brokers answering, instead of after up to 30 s of backoff: when a batch timed out while broker connections were failing, the uplink asks the brokers for the topic's metadata every 2 s and ends the backoff when they answer. Rejected records keep the full backoff
+- Discovery no longer warns on every reconnect about base addresses that hold no SunSpec map (for example 40000 on a device whose map is at 50000); those reads, and each failed Modbus attempt before a retry, are at debug. The poller still warns about a read that finally failed, and when no base has a map the error gives the device's last answer, e.g. `(last answer: Gateway target device failed to respond)`
+- The docs and the shipped environment file say how to run without Kafka (comment out `SUNSPEC_KAFKA_BROKERS`; an empty value is a configuration error) and suggest `RUST_LOG=info,collector_app=debug,poller_actor=debug` over a bare `debug`, which also turns on the libraries' debug output
+- The ignored Kafka decode test reads the device host from `SUNSPEC_E2E_DEVICE_HOST` (default `simulator`), so it also runs against a collector polling a simulator on the host
 - The documentation site is reorganized by task: Get started (quick start, deployment), Guides (Kafka security, serial devices, polling profiles, probing a device, verifying a release, monitoring and alerts, buffer maintenance, troubleshooting, upgrade notes), Reference (configuration, command-line options, HTTP endpoints, metrics, record format, models), How it works, Contributing and Project (with the changelog). The Operations page was split up; its old URL redirects to Deployment, and moved sections leave a pointer at their old place. The site now follows the system light or dark setting, and each page links to its source for editing
+
+### Fixed
+- A device closing its Modbus TCP connection is reported as `connection closed by the device`. tokio-modbus reports it as whatever OS error the thread saw last, so logs showed messages such as `Operation now in progress (os error 36)` or `Resource temporarily unavailable (os error 35)`
+- The deployment guide listed a `modbus reconnected` log line; the collector logs `modbus connected`
 
 ## [0.5.0] - 2026-10-18
 

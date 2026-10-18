@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use metrics::{counter, gauge, histogram};
-use modbus_client::{ClientConfig, ClientError, ModbusClient};
+use modbus_client::{ClientConfig, ClientError, ExceptionCode, ModbusClient};
 use sunspec_parser::{
     decode_model_labeled, model_name, ModelDefinition, SUNSPEC_END_ID, SUNSPEC_ID,
 };
@@ -114,8 +114,13 @@ pub struct DeviceConfig {
 pub enum PollerError {
     #[error(transparent)]
     Modbus(#[from] ClientError),
-    #[error("no SunSpec register map at base addresses {0:?}")]
-    NoSunSpecMap(Vec<u16>),
+    #[error("no SunSpec register map at base addresses {bases:?}{}", last_answer(.exception))]
+    NoSunSpecMap {
+        bases: Vec<u16>,
+        /// The device's last Modbus exception while looking, such as a gateway's "target
+        /// device failed to respond" for a unit ID with nothing behind it.
+        exception: Option<ExceptionCode>,
+    },
     #[error("SunSpec model chain is malformed: {0}")]
     MalformedChain(&'static str),
     #[error("none of the discovered models {0:?} is selected for polling")]
@@ -249,6 +254,7 @@ pub async fn discover_models<R: ReadRegisters>(
     unit_id: u8,
     bases: &[u16],
 ) -> Result<(u16, Vec<ModelDefinition>), PollerError> {
+    let mut exception = None;
     for &base in bases {
         match client.read_registers(unit_id, base, 2).await {
             Ok(marker) if marker == SUNSPEC_ID => {
@@ -256,11 +262,25 @@ pub async fn discover_models<R: ReadRegisters>(
                     .await
                     .map(|models| (base, models));
             }
-            Ok(_) | Err(ClientError::Exception(_)) => continue,
+            // A miss at a candidate base is expected; the caller reports a map found nowhere.
+            Ok(marker) => debug!(unit_id, base, ?marker, "no SunSpec marker at this base"),
+            Err(ClientError::Exception(code)) => {
+                debug!(unit_id, base, exception = %code, "no SunSpec map at this base");
+                exception = Some(code);
+            }
             Err(err) => return Err(err.into()),
         }
     }
-    Err(PollerError::NoSunSpecMap(bases.to_vec()))
+    Err(PollerError::NoSunSpecMap {
+        bases: bases.to_vec(),
+        exception,
+    })
+}
+
+fn last_answer(exception: &Option<ExceptionCode>) -> String {
+    exception
+        .map(|code| format!(" (last answer: {code})"))
+        .unwrap_or_default()
 }
 
 async fn walk_chain<R: ReadRegisters>(
@@ -568,7 +588,7 @@ fn error_kind(err: &ClientError) -> &'static str {
     match err {
         ClientError::Exception(_) => "exception",
         ClientError::Timeout { .. } => "timeout",
-        ClientError::Transport(_) => "transport",
+        ClientError::Transport(_) | ClientError::Disconnected => "transport",
         ClientError::Connect { .. } | ClientError::InvalidAddress(..) => "connect",
         ClientError::AddressOverflow => "address",
     }

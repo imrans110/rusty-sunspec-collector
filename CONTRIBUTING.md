@@ -57,6 +57,9 @@ SUNSPEC_KAFKA_BROKERS=localhost:29092 \
 docker compose down -v
 ```
 
+The decode test expects records keyed by the compose simulator (`simulator/1`, ...). Against a
+collector polling a simulator on your machine, add `SUNSPEC_E2E_DEVICE_HOST=127.0.0.1`.
+
 To try the collector by hand against simulated devices:
 
 ```sh

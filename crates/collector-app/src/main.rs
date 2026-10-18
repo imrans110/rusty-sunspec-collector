@@ -1,12 +1,17 @@
 use std::env;
-
 use std::io::IsTerminal;
+use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 
-use collector_app::CollectorConfig;
+use collector_app::{CollectorConfig, ConfigError};
+
+/// Exit status for an error in the settings (`EX_CONFIG` from sysexits.h). The systemd
+/// unit sets `RestartPreventExitStatus=78`, so a bad setting stops the service once
+/// instead of restarting it every few seconds.
+const EXIT_CONFIG: u8 = 78;
 
 const USAGE: &str = "\
 usage: collector-app [--config PATH]
@@ -23,7 +28,21 @@ Settings come from the config file (--config or SUNSPEC_CONFIG) and SUNSPEC_* en
 variables; see https://imrans110.github.io/rusty-sunspec-collector/configuration.html";
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("Error: {err:?}");
+            if err.downcast_ref::<ConfigError>().is_some() {
+                ExitCode::from(EXIT_CONFIG)
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+    }
+}
+
+async fn run() -> Result<()> {
     for arg in env::args().skip(1) {
         match arg.as_str() {
             "--print-schema" => {
@@ -51,14 +70,12 @@ async fn main() -> Result<()> {
     if let Some(target) = arg_value("--probe") {
         return run_probe(&target).await;
     }
-    init_logging()?;
+    init_logging().context(ConfigError("logging setup failed"))?;
 
     // Install signal handlers first so a stop during startup is still graceful.
     let shutdown = tokio::spawn(shutdown_signal());
 
-    let config =
-        CollectorConfig::load_with_path(parse_config_arg()).context("load config failed")?;
-    config.validate().context("config validation failed")?;
+    let config = load_config()?;
 
     let metrics = collector_app::metrics_server::install_recorder()
         .context("failed to install metrics recorder")?;
@@ -105,6 +122,15 @@ fn parse_config_arg() -> Option<String> {
     arg_value("--config")
 }
 
+fn load_config() -> Result<CollectorConfig> {
+    let config = CollectorConfig::load_with_path(parse_config_arg())
+        .context(ConfigError("load config failed"))?;
+    config
+        .validate()
+        .context(ConfigError("config validation failed"))?;
+    Ok(config)
+}
+
 /// The value of `--name VALUE` or `--name=VALUE`.
 fn arg_value(name: &str) -> Option<String> {
     let mut args = env::args().skip(1);
@@ -126,9 +152,7 @@ fn arg_value(name: &str) -> Option<String> {
 /// can be redirected to a file.
 async fn run_probe(target: &str) -> Result<()> {
     let identity = collector_app::config::parse_device(target).context("--probe")?;
-    let config =
-        CollectorConfig::load_with_path(parse_config_arg()).context("load config failed")?;
-    config.validate().context("config validation failed")?;
+    let config = load_config()?;
     let keep_identifiers = env::args().any(|arg| arg == "--keep-identifiers");
 
     let dump = collector_app::probe::probe(&config, identity, keep_identifiers).await?;

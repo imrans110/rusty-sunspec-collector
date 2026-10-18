@@ -38,7 +38,8 @@ fuzz/              – cargo-fuzz targets (own workspace, nightly): decode_model
 cargo build --workspace
 cargo test --workspace     # simulator-backed; no hardware or Kafka needed
 
-# Ignored Kafka tests, with the compose stack running:
+# Ignored Kafka tests, with the compose stack running (SUNSPEC_E2E_DEVICE_HOST=127.0.0.1 when the
+# collector polls a simulator on the host instead of the compose one):
 SUNSPEC_KAFKA_BROKERS=localhost:29092 cargo test -p avro-kafka --test kafka_integration_tests -- --ignored
 
 # Run locally against the simulator (no brokers set = records only logged at debug)
@@ -86,7 +87,10 @@ Dockerfiles' digests.
 ## Conventions
 
 - **Error handling**: Library crates use `thiserror`; `collector-app` uses `anyhow`.
-- **Logging**: Use `tracing` macros with structured fields; per-cycle/per-drain messages at debug.
+- **Logging**: Use `tracing` macros with structured fields; per-cycle/per-drain messages at debug,
+  and so are expected misses (a discovery base without a map, a Modbus attempt before a retry);
+  the caller logs the final failure. librdkafka's logs and errors go through avro-kafka's
+  `KafkaContext`, which logs a failed broker connection at warn at most once per 5 minutes.
 - **No `#![allow(dead_code)]`** — address warnings before merging.
 - **`types` crate stays lightweight** — only `serde` as a dependency.
 - **Formatting**: `rustfmt.toml` enforces max width 100 and auto-reordered imports.
@@ -132,7 +136,10 @@ Dockerfiles' digests.
 - **At-least-once uplink**: one Kafka record per sample; delete only rows Kafka acknowledged;
   undelivered rows stay and are retried first; rows that can never be encoded are deleted and
   counted `reason="corrupt"`. Drains back to back while batches are full; backs off 1 s × 2^(n−1)
-  up to 30 s on errors.
+  up to 30 s on errors. After a batch timed out while broker connections were failing
+  (`Publisher::brokers_unreachable`), the backoff probes the brokers (`Publisher::probe`, topic
+  metadata) every 2 s and ends as soon as they answer; rejected records keep the full backoff.
+  The first delivery after failures logs `records delivered again`.
 - **Retention** (every 10 s): `buffer.max_age_s` and `buffer.max_rows`, counted in
   `sunspec_buffer_dropped_total{reason}`.
 - **Shutdown order** (SIGINT/SIGTERM via a `tokio::sync::watch` channel): device pollers (10 s
@@ -142,8 +149,11 @@ Dockerfiles' digests.
   `SUNSPEC_*` env. Unknown file keys (`deny_unknown_fields`), unparsable env values, invalid static
   devices and unsupported `kafka.acks`/`kafka.compression` fail at startup; `validate()` rejects
   zero intervals and ports, `modbus.max_batch_size` above 125, and `kafka.acks` 0/1 while
-  idempotence is on. An unbindable metrics port stops startup (`bind metrics port <port>`). New
-  settings need validation and docs.
+  idempotence is on. These exit with status 78 (`EX_CONFIG`: errors carrying the
+  `collector_app::ConfigError` context, including a Kafka producer that rejects its settings),
+  which the unit does not restart (`RestartPreventExitStatus=78`); other startup errors exit 1. An
+  unbindable metrics port stops startup (`bind metrics port <port>`, exit 1). New settings need
+  validation and docs.
 - **Live readings**: `DeviceHealth::snapshot()` holds the latest discovery and one `Sample` per
   polled model; `Health::devices()` serves them as `/devices` and `/devices/{host}/{unit}` on the
   metrics port (`health.rs`, `metrics_server.rs`).

@@ -32,6 +32,18 @@ const DEFAULT_METRICS_PORT: u16 = 9090;
 /// SunSpec model IDs run from 1 to 65534; 65535 marks the end of the model chain.
 const MAX_MODEL_ID: u16 = 65_534;
 
+/// Context for an error in the settings, which restarting cannot fix: `collector-app`
+/// exits with status 78 (`EX_CONFIG`) for these, and the systemd unit does not restart
+/// on that status.
+#[derive(Debug, Clone, Copy)]
+pub struct ConfigError(pub &'static str);
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
 const KAFKA_COMPRESSION: &[&str] = &["none", "gzip", "snappy", "lz4", "zstd"];
 const KAFKA_ACKS: &[&str] = &["0", "1", "-1", "all"];
 const KAFKA_SECURITY_PROTOCOLS: &[&str] = &["plaintext", "ssl", "sasl_plaintext", "sasl_ssl"];

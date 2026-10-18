@@ -155,7 +155,9 @@ SUNSPEC_STATIC_DEVICES=127.0.0.1:1,127.0.0.1:2 SUNSPEC_PORT=1502 \
   RUST_LOG=info,avro_kafka=debug cargo run -p collector-app
 ```
 
-`RUST_LOG=debug` shows everything, including every Modbus read and poll cycle. The buffer is
+`RUST_LOG=info,collector_app=debug,poller_actor=debug` shows the collector's own detail, such as
+every poll cycle and uplink batch. A bare `RUST_LOG=debug` also turns on the libraries' debug
+output (Avro schema parsing, every SQL statement), which buries those lines. The buffer is
 `sunspec-buffer.sqlite` in the current directory. Check the collector from a third terminal:
 
 ```sh
@@ -303,19 +305,19 @@ publisher. Tests use short real intervals (100 ms polls), so they take seconds o
 | File | Covers |
 |------|--------|
 | `crates/sunspec-parser/tests/decode_tests.rs` | Enum and bitfield labels (named, unnamed bits, unknown and unimplemented values, repeating groups); the catalog covers every point name records carry, for every model, with units, labels and symbols; every file in `models/` is bundled; every model decodes a zeroed map with each top-level point once and unique point names, and short or long maps never panic; float meters 211–214; model names; scaling (model 103); "not implemented" values become null; header, scale factors and padding are omitted; model 1 strings; model 160 repeating modules using top-level scale factors; float models and NaN; truncated registers |
-| `crates/modbus-client/tests/sim_tests.rs` | Reads over 125 registers are split; an oversized `max_batch_size` passed to the client library is clamped to 125; an exception keeps the connection; reconnect after a dropped connection; a timeout drops the connection and recovers; offline device fails to connect, then recovers; hostnames are resolved |
+| `crates/modbus-client/tests/sim_tests.rs` | Reads over 125 registers are split; an oversized `max_batch_size` passed to the client library is clamped to 125; an exception keeps the connection; reconnect after a dropped connection, which reads as `Disconnected` rather than a leftover OS error; a timeout drops the connection and recovers; offline device fails to connect, then recovers; hostnames are resolved |
 | `crates/modbus-client/tests/rtu_tests.rs` | RTU over TCP against the simulator's converter mode: split reads and two units over one connection, exceptions, an absent unit timing out and the client reconnecting, concurrent readers sharing one client |
-| `crates/poller-actor/tests/device_tests.rs` | Discovery of a 290-register, 7-model chain; map found at another standard base; device without a SunSpec map; device offline at startup is polled once it appears; a stalled session is restarted |
+| `crates/poller-actor/tests/device_tests.rs` | Discovery of a 290-register, 7-model chain; map found at another standard base; device without a SunSpec map (the error gives its last exception); device offline at startup is polled once it appears; a stalled session is restarted |
 | `crates/buffer/tests/buffer_tests.rs` | Enqueue, dequeue and delete; deleting nothing is a no-op; batch enqueue keeps order; trimming keeps the newest rows; age-based retention |
 | `crates/avro-kafka/tests/codec_tests.rs` | Single-object round trip (points and labels); `labels` was added with a default; `C3 01` and fingerprint header; a foreign fingerprint is rejected; one record per sample keyed by device |
-| `crates/avro-kafka/tests/kafka_config_tests.rs` | The producer accepts every supported compression codec (zstd is compiled in), the default config and each security protocol (TLS with the `tests/fixtures/test-ca.pem` CA, SASL PLAIN and SCRAM); an unreadable CA is rejected; secrets are redacted in debug output. No broker needed |
+| `crates/avro-kafka/tests/kafka_config_tests.rs` | The producer accepts every supported compression codec (zstd is compiled in), the default config and each security protocol (TLS with the `tests/fixtures/test-ca.pem` CA, SASL PLAIN and SCRAM); an unreadable CA is rejected; secrets are redacted in debug output; an unreachable broker is reported and fails the probe the uplink uses to end its backoff early. No broker needed |
 | `crates/avro-kafka/tests/kafka_integration_tests.rs` | Ignored by default; see below |
 | `crates/collector-app/tests/app_tests.rs` | The whole collector against the simulator: every unit behind a gateway is polled; every model of a long chain is polled; subnet mode keeps running and finds a device on rescan; a 5,000-row backlog drains within 2 s; published records are decoded and keyed by device; a metrics port that is already taken fails startup (`a_taken_metrics_port_fails_startup`) |
 | `crates/collector-app/tests/config_validation_tests.rs` | TOML and JSON fixtures (`tests/fixtures/`); invalid values fail validation; unknown keys are rejected; unparsable environment values name the variable; static device parsing (unit range, hostnames, default unit); Kafka compression and acks values; `acks` below `all` only with idempotence off (`acks_below_all_require_idempotence_off`); `modbus.max_batch_size` at most 125 (`modbus_batch_size_is_limited_to_the_protocol_maximum`); `[metrics]` and `[runtime]` sections; the shipped `docs/config.example.toml` and `docs/sunspec-collector.env` load and validate (`shipped_example_config_file_is_valid`, `shipped_example_env_file_is_valid`; the env file is read the way systemd and Docker read it, without trailing comments); Kafka security: SASL requires mechanism, username and password, `ssl_*`/`sasl_*` settings must match the protocol, certificate files must exist, passwords load from `*_password_file` and never appear in debug output |
 | `crates/collector-app/tests/polling_profile_tests.rs` | Polling profiles from TOML, JSON and environment variables; per-device merge rules; `SUNSPEC_STATIC_DEVICES` dropping file overrides; every validation error; every TOML and JSON example in the Polling profiles and Complete examples sections of `docs/configuration.md`; an end-to-end run where the simulator's read counts show slow models are read less often |
 | `crates/collector-app/tests/devices_endpoint_tests.rs` | `/devices` against a collector polling the simulator: devices sorted, a down unit listed without readings, scaled values in definition order, a changed register visible within a few poll intervals, `/devices/{host}/{unit}` and its 404 |
 | `crates/collector-app/tests/rtu_tests.rs` | Framing from the file, the environment and device entries; units on one RTU converter must share timeout and batch size; two units behind one simulated converter are polled end to end over a single connection; `--probe` through a converter |
-| `crates/collector-app/tests/cli_tests.rs` | `--version`, `--help`, `--print-schema`; `--probe` against the simulator prints only JSON on stdout with the serial number blanked; a bad `--probe` target fails |
+| `crates/collector-app/tests/cli_tests.rs` | `--version`, `--help`, `--print-schema`; `--probe` against the simulator prints only JSON on stdout with the serial number blanked; a bad `--probe` target fails; a bad setting exits with 78 (`EX_CONFIG`) and other startup errors with 1 |
 | `crates/collector-app/tests/fixture_replay_tests.rs` | Every dump in `fixtures/devices/` is served by the simulator, probed again, and must give the same model chain, registers and decoded points; a dump with a broken chain is rejected |
 | `crates/collector-app/tests/metrics_tests.rs` | `/healthz` and `/metrics` of a collector polling unit 1 and a unit 7 that does not exist: `devices_up` 1 of `devices_total` 2, HELP text, per-device series, `sunspec_device_up` 1 for unit 1 and 0 for the unreachable unit 7, histogram buckets, no `batch_size` label. It installs the global metrics recorder, so it is its own test binary. |
 | `crates/collector-app/tests/signal_tests.rs` | Unix only: spawns the built `collector-app` binary, sends SIGTERM and expects a graceful stop with exit code 0 |
@@ -337,8 +339,10 @@ publisher. Tests use short real intervals (100 ms polls), so they take seconds o
 - `publishes_keyed_records_to_kafka` publishes two records to `SUNSPEC_KAFKA_BROKERS`.
 - `published_records_decode_to_samples` consumes the topic and checks that the records published by
   a running collector decode, carry the `content-type` header, are keyed by their device, and
-  include a decoded model 103 power value. It expects records from the compose stack's simulator
-  (keys `simulator/1`, `simulator/2`).
+  include a decoded model 103 power value. It expects records from devices on
+  `SUNSPEC_E2E_DEVICE_HOST`, by default `simulator`, the compose stack's simulator (keys
+  `simulator/1`, `simulator/2`). For a collector polling a simulator on the host, set
+  `SUNSPEC_E2E_DEVICE_HOST=127.0.0.1`.
 
 Run them against the compose stack, once the collector is healthy and publishing:
 
@@ -579,8 +583,9 @@ the docs, and deploys the site from `main`. A page that moves gets a redirect in
 ### Verbose logging
 
 ```sh
-RUST_LOG=debug cargo run -p collector-app
-RUST_LOG=info,poller_actor=debug,modbus_client=debug cargo run -p collector-app
+RUST_LOG=info,collector_app=debug,poller_actor=debug cargo run -p collector-app
+RUST_LOG=info,poller_actor=debug,modbus_client=debug cargo run -p collector-app   # every read
+RUST_LOG=debug cargo run -p collector-app             # everything, libraries included
 SUNSPEC_LOG_FORMAT=json cargo run -p collector-app    # one JSON object per line
 ```
 

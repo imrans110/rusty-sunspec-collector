@@ -41,8 +41,10 @@ defaults and environment variables apply. A file that is named but cannot be rea
 
 ## Strict validation
 
-Configuration errors stop the collector at startup with exit status 1. Nothing falls back to a
-default silently. The following are errors:
+Configuration errors stop the collector at startup with exit status 78 (`EX_CONFIG`). The
+systemd unit does not restart on that status (`RestartPreventExitStatus=78`), so a bad setting
+leaves the service failed, with the error in the journal, instead of restarting it every few
+seconds. Nothing falls back to a default silently. The following are errors:
 
 - Unknown keys or sections in the config file, and values of the wrong type (for example a string
   where a number is expected, or `unit_id = 300`).
@@ -352,18 +354,25 @@ Logging is configured with environment variables only.
 
 | Variable | Values | Notes |
 |----------|--------|-------|
-| `RUST_LOG` | [`tracing` filter directives](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) | Default `info`. Examples: `warn`, `info,poller_actor=debug`, `info,modbus_client=debug,avro_kafka=debug`. If unset or unparsable, `info` is used. |
+| `RUST_LOG` | [`tracing` filter directives](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) | Default `info`. Examples: `warn`, `info,poller_actor=debug`, `info,modbus_client=debug,avro_kafka=debug`. If unset or unparsable, `info` is used. Prefer targets to a bare `debug`, which also turns on the libraries' debug output (Avro schema parsing, every SQL statement). |
 | `SUNSPEC_LOG_FORMAT` | `text`, `json` | Default `text`. `json` writes one JSON object per line for log shippers. Any other value is a startup error. |
 
 Logs go to standard output. ANSI colours are used only when standard output is a terminal.
 
 Steady-state operation is quiet at `info`: per-cycle and per-batch messages are logged at debug.
-Useful debug targets:
+For a closer look at the collector itself, `RUST_LOG=info,collector_app=debug,poller_actor=debug`
+reads well. Useful debug targets:
 
-- `poller_actor`: poll cycle timings.
-- `modbus_client`: every read.
+- `poller_actor`: poll cycle timings, and each base address discovery tries without finding a
+  SunSpec map.
+- `modbus_client`: every read, and every failed attempt before a retry (the poller logs the read
+  that finally failed at warn).
 - `collector_app::uplink`: every uplink batch.
-- `avro_kafka`: records handled by the log-only sink when no brokers are set.
+- `avro_kafka`: records handled by the log-only sink when no brokers are set, and every failed
+  broker connection. At `info` a failed connection is logged at warn at most once per 5 minutes
+  ("Kafka broker connection failed"), and the uplink logs "records delivered again" when an
+  outage ends.
+- `librdkafka`: the Kafka client library's own log lines.
 - `discovery`: every probe during a subnet scan.
 
 ---
@@ -516,6 +525,9 @@ Save it with a `.json` extension so it is parsed as JSON.
 ```sh
 SUNSPEC_STATIC_DEVICES=192.168.1.20:1 RUST_LOG=info,avro_kafka=debug collector-app
 ```
+
+With the systemd unit, comment out the `SUNSPEC_KAFKA_BROKERS` line in
+`/etc/sunspec-collector.env`; an empty value fails validation.
 
 ### Subnet scan with Kafka
 

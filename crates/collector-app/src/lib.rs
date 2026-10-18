@@ -10,4 +10,4 @@ mod systemd;
 mod uplink;
 
 pub use app::{run, run_with_publisher};
-pub use config::{CollectorConfig, ConfigFormat};
+pub use config::{CollectorConfig, ConfigError, ConfigFormat};

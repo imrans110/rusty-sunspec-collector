@@ -2,6 +2,12 @@
 
 ## Startup errors
 
+A wrong setting stops the collector with exit status 78. Under systemd the service then stays
+failed instead of restarting: `systemctl status sunspec-collector` shows `status=78`, and
+`journalctl -u sunspec-collector -n 20` shows the error. Fix the setting, then run
+`systemctl restart sunspec-collector`. Other startup errors exit with status 1, and systemd keeps
+retrying every 5 s.
+
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `load config failed` ... `unknown field` | Misspelled or removed key in the config file | Compare with the [reference](../configuration.md#reference). |
@@ -10,6 +16,7 @@
 | `config validation failed` | Value out of range | The message names the key and the allowed values. |
 | `config validation failed` ... `kafka.acks must be all (or -1) while kafka.enable_idempotence is true` | `acks` of `0` or `1` with idempotence on (the default) | Set `kafka.enable_idempotence = false` or `acks = "all"`. |
 | `config validation failed` ... `modbus.max_batch_size must be between 1 and 125` | Batch size above the Modbus limit | Use a value from 1 to 125. |
+| `config validation failed` ... `kafka.brokers must be non-empty when set` | `SUNSPEC_KAFKA_BROKERS=` with no value | Set the brokers, or comment the line out to run without Kafka (records are then only logged). |
 | `kafka publisher init failed` | librdkafka rejected a setting when the producer was created | The message gives librdkafka's reason. |
 | `bind metrics port <port>` | The port is in use (often a second collector) or not permitted | Stop the other process or change `metrics.port` / `SUNSPEC_METRICS_PORT`. |
 | `buffer init failed` | Buffer path not writable | systemd: keep the buffer under `/var/lib/sunspec-collector`. Docker: mount a volume at `/app/data` and keep `buffer.path` relative or under `/app/data`. |
@@ -43,15 +50,17 @@ See [Probing a device](probing-a-device.md).
 |-----------------------------------|--------------|
 | `could not resolve host:port` | Hostname does not resolve. |
 | `connect to ... failed` / `request timed out after ...ms` | Wrong host or port, firewall, device offline, or `poller.request_timeout_ms` too short. Test with `nc -zv <host> <port>`. |
-| `no SunSpec register map at base addresses [...]` | The `SunS` marker was not found at any base. The device may not be SunSpec, may use another base address (set `sunspec.base_address`), or the unit ID is wrong. |
+| `no SunSpec register map at base addresses [...]` | The `SunS` marker was not found at any base. The device may not be SunSpec, may use another base address (set `sunspec.base_address`), or the unit ID is wrong. `(last answer: ...)` gives the device's last Modbus exception. |
+| `connection closed by the device` | The device or gateway closed the TCP connection. Many devices accept only one Modbus TCP client at a time, or close idle connections; check for another client polling the same device. |
 | `SunSpec model chain is malformed: ...` | The model headers do not form a valid chain ending in `0xFFFF`. |
 | `10 consecutive poll cycles failed` | Reads keep failing after discovery; check `sunspec_poll_errors_total{kind}`. Devices that reject large reads need a lower `modbus.max_batch_size`. |
 | `no successful read for ...` | Stall detection; see [Stalls](#stalls). |
 | `none of the discovered models [...] is selected for polling` | `include_models` / `exclude_models` (global or on the device entry) leave nothing to poll on this device. The list shows the models it has. |
 
-If the `modbus read failed` lines before a session ends show
-`device returned modbus exception: Gateway target device failed to respond`, a gateway answered
-but has no device at that unit ID. Check the unit IDs.
+If discovery reports `(last answer: Gateway target device failed to respond)`, or the
+`modbus read failed` lines before a session ends show that exception, a gateway answered but has no
+device at that unit ID. Check the unit IDs. Each failed attempt before a retry is logged at debug
+(`RUST_LOG=info,modbus_client=debug`).
 
 Failed sessions are retried with exponential backoff capped at 60 s, so a device that comes back
 online is picked up within about a minute without restarting the collector.
@@ -63,10 +72,14 @@ online is picked up within about a minute without restarting the collector.
    removed from the buffer.
 2. Check `sunspec_uplink_errors_total` and the `records not delivered; they stay buffered` log
    line. Rising errors mean the brokers are unreachable or are rejecting the records (wrong
-   address, missing topic with auto-creation disabled, ACLs, or a security mismatch). librdkafka's
-   own error lines name the broker; authentication problems show up as `SASL authentication
-   error` or `SSL handshake failed`. Check `kafka.security_protocol`, the SASL mechanism and
-   credentials, and that `kafka.ssl_ca_location` holds the CA that signed the broker certificate.
+   address, missing topic with auto-creation disabled, ACLs, or a security mismatch).
+   `Kafka broker connection failed` gives librdkafka's reason, naming the broker; it is logged at
+   warn at most once per 5 minutes, and every attempt at debug (`RUST_LOG=info,avro_kafka=debug`).
+   `records delivered again` marks the end of an outage. Authentication problems show up as
+   `Kafka client error`
+   with `SASL authentication error` or `SSL handshake failed`. Check `kafka.security_protocol`,
+   the SASL mechanism and credentials, and that `kafka.ssl_ca_location` holds the CA that signed
+   the broker certificate.
 3. Check `sunspec_buffer_oldest_age_seconds` and `sunspec_buffer_rows`. If they grow while
    `sunspec_uplink_records_total` is flat, nothing is being delivered.
 4. If records arrive but consumers fail to read them, the consumers may still expect the old

@@ -10,7 +10,7 @@ use tokio::time::{sleep, timeout};
 use tokio_modbus::client::{rtu, tcp, Context, Reader};
 use tokio_modbus::slave::{Slave, SlaveContext};
 pub use tokio_modbus::ExceptionCode;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Protocol limit for a single read holding registers (0x03) request.
 pub const MAX_REGISTERS_PER_READ: u16 = 125;
@@ -83,6 +83,8 @@ pub enum ClientError {
     },
     #[error("modbus transport error: {0}")]
     Transport(#[from] tokio_modbus::Error),
+    #[error("connection closed by the device")]
+    Disconnected,
     #[error("device returned modbus exception: {0}")]
     Exception(ExceptionCode),
     #[error("request timed out after {timeout_ms}ms")]
@@ -100,8 +102,41 @@ impl ClientError {
             Self::InvalidAddress(..)
                 | Self::Connect { .. }
                 | Self::Transport(_)
+                | Self::Disconnected
                 | Self::Timeout { .. }
         )
+    }
+
+    /// tokio-modbus reports a connection the device closed as `io::Error::last_os_error()`,
+    /// which is whatever error number the thread saw last ("Operation now in progress (os
+    /// error 36)", "Undefined error: 0"). Errors meaning the connection is gone, and error
+    /// numbers no failed socket read returns, become [`ClientError::Disconnected`].
+    fn from_transport(err: tokio_modbus::Error) -> Self {
+        use std::io::ErrorKind;
+
+        let tokio_modbus::Error::Transport(io) = &err else {
+            return Self::Transport(err);
+        };
+        let closed = matches!(
+            io.kind(),
+            ErrorKind::UnexpectedEof
+                | ErrorKind::BrokenPipe
+                | ErrorKind::NotConnected
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted
+                | ErrorKind::WouldBlock
+        );
+        let stale = match io.raw_os_error() {
+            Some(0) => true,
+            #[cfg(unix)]
+            Some(code) => code == libc::EINPROGRESS,
+            _ => false,
+        };
+        if closed || stale {
+            Self::Disconnected
+        } else {
+            Self::Transport(err)
+        }
     }
 
     fn is_retryable(&self) -> bool {
@@ -210,7 +245,9 @@ impl ModbusClient {
                 }
                 Err(error) => error,
             };
-            warn!(unit_id, start, count, error = %error, "modbus read failed");
+            // Callers report the final outcome; an exception can also be expected, as when
+            // discovery tries a base address the device does not use.
+            debug!(unit_id, start, count, error = %error, attempt = attempts + 1, "modbus read failed");
 
             if error.is_connection_error() {
                 // A timed-out or broken connection can deliver stale responses; start over.
@@ -250,7 +287,7 @@ impl ModbusClient {
         {
             Ok(Ok(Ok(values))) => Ok(values),
             Ok(Ok(Err(code))) => Err(ClientError::Exception(code)),
-            Ok(Err(err)) => Err(ClientError::Transport(err)),
+            Ok(Err(err)) => Err(ClientError::from_transport(err)),
             Err(_) => Err(ClientError::Timeout {
                 timeout_ms: self.config.timeout_ms,
             }),

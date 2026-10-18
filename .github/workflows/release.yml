@@ -17,6 +17,7 @@ on:
       - "docker/Dockerfile.cross"
       - "Cross.toml"
       - "scripts/**"
+      - "docs/sunspec-collector.service"
   workflow_dispatch:
 
 permissions:
@@ -246,6 +247,20 @@ jobs:
           sudo systemctl restart sunspec-collector
           sudo systemctl stop sunspec-collector
           sudo journalctl -u sunspec-collector --no-pager | grep -q "collector stopped"
+
+      # The unit sets RestartPreventExitStatus=78, the status collector-app exits with when a
+      # setting is wrong, so systemd stops instead of restarting it every RestartSec.
+      - name: A bad setting stops the service instead of restarting it
+        run: |
+          echo SUNSPEC_KAFKA_BROKERS= | sudo tee -a /etc/sunspec-collector.env > /dev/null
+          sudo systemctl start sunspec-collector || true
+          sleep 8
+          systemctl show -p ActiveState -p Result -p ExecMainStatus -p NRestarts sunspec-collector
+          test "$(systemctl show -p ExecMainStatus --value sunspec-collector)" = 78
+          test "$(systemctl show -p ActiveState --value sunspec-collector)" = failed
+          test "$(systemctl show -p NRestarts --value sunspec-collector)" = 0
+          sudo journalctl -u sunspec-collector --no-pager | grep -q "kafka.brokers must be non-empty"
+          sudo sed -i '/^SUNSPEC_KAFKA_BROKERS=$/d' /etc/sunspec-collector.env
 
       - name: Service logs
         if: always()
