@@ -9,6 +9,7 @@ description = "Avro OCF serialization with Kafka producer"
 
 [dependencies]
 thiserror = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 apache-avro = "0.22"
 rdkafka = { version = "0.39", features = ["cmake-build", "ssl", "tokio", "zstd"] }

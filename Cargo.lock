@@ -1144,6 +1144,7 @@ dependencies = [
 name = "modbus-client"
 version = "0.5.0"
 dependencies = [
+ "libc",
  "serde",
  "sunspec-sim",
  "thiserror",

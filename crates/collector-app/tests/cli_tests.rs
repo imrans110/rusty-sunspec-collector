@@ -102,3 +102,49 @@ fn print_models_prints_the_catalog() {
         .iter()
         .any(|symbol| symbol["name"] == "MPPT" && symbol["value"] == 4));
 }
+
+// The systemd unit sets RestartPreventExitStatus=78, so a bad setting stops the service
+// instead of restarting it every few seconds.
+#[test]
+fn a_bad_setting_exits_with_ex_config() {
+    let output = Command::new(env!("CARGO_BIN_EXE_collector-app"))
+        .env_clear()
+        .env("SUNSPEC_KAFKA_BROKERS", "")
+        .output()
+        .expect("run collector-app");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(78), "{stderr}");
+    assert!(stderr.contains("config validation failed"), "{stderr}");
+    assert!(
+        stderr.contains("kafka.brokers must be non-empty"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn an_unparsable_env_value_exits_with_ex_config() {
+    let output = Command::new(env!("CARGO_BIN_EXE_collector-app"))
+        .env_clear()
+        .env("SUNSPEC_PORT", "five-oh-two")
+        .output()
+        .expect("run collector-app");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(78), "{stderr}");
+    assert!(stderr.contains("SUNSPEC_PORT"), "{stderr}");
+}
+
+// A metrics port in use may come free, so systemd should keep restarting.
+#[test]
+fn a_startup_failure_that_can_pass_exits_with_1() {
+    let taken = std::net::TcpListener::bind("0.0.0.0:0").expect("bind a port");
+    let port = taken.local_addr().expect("local addr").port();
+    let output = Command::new(env!("CARGO_BIN_EXE_collector-app"))
+        .env_clear()
+        .env("SUNSPEC_METRICS_PORT", port.to_string())
+        .env("SUNSPEC_STATIC_DEVICES", "127.0.0.1:1")
+        .output()
+        .expect("run collector-app");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("bind metrics port"), "{stderr}");
+}

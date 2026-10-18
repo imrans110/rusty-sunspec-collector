@@ -32,9 +32,9 @@ Notes:
   and moves on to the next base. A device with no SunSpec map at any base therefore shows only
   `sunspec_poller_restarts_total` and a `device session ended` log line.
 - `kind` values: `exception` (the device returned a Modbus exception), `timeout` (a read or a
-  connect timed out), `transport` (I/O or protocol error on the connection), `connect` (the
-  connection was refused or failed, or the host could not be resolved), `address` (the read would
-  run past register 65535).
+  connect timed out), `transport` (I/O or protocol error on the connection, or the device closed
+  it), `connect` (the connection was refused or failed, or the host could not be resolved),
+  `address` (the read would run past register 65535).
 - `sunspec_uplink_errors_total` counts per attempt: a record that fails three times counts three
   times. During a Kafka outage it grows by up to `buffer.batch_size` per attempt.
 - Without `kafka.brokers`, records handed to the log-only sink count in

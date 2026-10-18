@@ -3,16 +3,20 @@
 //! then the datum). The schema is `schemas/sunspec_sample.avsc`.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use apache_avro::headers::{HeaderBuilder, RabinFingerprintHeader};
 use apache_avro::types::Value;
 use apache_avro::{GenericSingleObjectReader, GenericSingleObjectWriter, Schema};
-use rdkafka::config::ClientConfig;
+use rdkafka::client::ClientContext;
+use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
+use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::{Header, OwnedHeaders};
-use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, error, info, warn};
 use types::{DeviceIdentity, PointValue, Sample};
 
 /// Avro schema of every published record.
@@ -32,6 +36,18 @@ pub enum PublishError {
     Cancelled,
     #[error("record does not match the sample schema: {0}")]
     Schema(&'static str),
+}
+
+impl PublishError {
+    /// Whether Kafka never answered for the record within `kafka.timeout_ms`, as when the
+    /// brokers are unreachable, rather than rejecting it.
+    pub fn is_timeout(&self) -> bool {
+        matches!(
+            self,
+            PublishError::Kafka(err)
+                if err.rdkafka_error_code() == Some(RDKafkaErrorCode::MessageTimedOut)
+        )
+    }
 }
 
 impl From<apache_avro::Error> for PublishError {
@@ -295,9 +311,92 @@ impl MemorySink {
     }
 }
 
+/// After a broker connection failure is logged at warn, repeats are logged at debug for
+/// this long. librdkafka reconnects about once a second and reports every attempt (twice).
+const CONNECTION_FAILURE_QUIET: Duration = Duration::from_secs(300);
+
+/// Broker connection state, shared by the producer's context and the [`Publisher`].
+#[derive(Debug, Default)]
+struct BrokerState {
+    /// Set when a broker connection fails; cleared by a delivery or a probe the brokers
+    /// answer.
+    failed: AtomicBool,
+    /// When a connection failure was last logged at warn.
+    last_warned: Mutex<Option<Instant>>,
+}
+
+impl BrokerState {
+    fn connection_failed(&self, reason: &str) {
+        self.failed.store(true, Ordering::Relaxed);
+        let mut last_warned = self
+            .last_warned
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = Instant::now();
+        if last_warned.is_some_and(|at| now.duration_since(at) < CONNECTION_FAILURE_QUIET) {
+            debug!(reason, "Kafka broker connection failed");
+        } else {
+            *last_warned = Some(now);
+            warn!(
+                reason,
+                "Kafka broker connection failed; repeats are logged at debug for 5 minutes"
+            );
+        }
+    }
+
+    fn answered(&self) {
+        self.failed.store(false, Ordering::Relaxed);
+    }
+}
+
+/// Sends librdkafka's logs and errors to `tracing`, logging broker connection failures
+/// at warn at most once per [`CONNECTION_FAILURE_QUIET`].
+struct KafkaContext {
+    brokers: Arc<BrokerState>,
+}
+
+impl ClientContext for KafkaContext {
+    fn log(&self, level: RDKafkaLogLevel, fac: &str, message: &str) {
+        // Connection failures are also reported to `error`, which limits how often they
+        // are logged at warn.
+        if fac == "FAIL" {
+            debug!(target: "librdkafka", "{fac} {message}");
+            return;
+        }
+        match level {
+            RDKafkaLogLevel::Emerg
+            | RDKafkaLogLevel::Alert
+            | RDKafkaLogLevel::Critical
+            | RDKafkaLogLevel::Error => error!(target: "librdkafka", "{fac} {message}"),
+            RDKafkaLogLevel::Warning => warn!(target: "librdkafka", "{fac} {message}"),
+            RDKafkaLogLevel::Notice | RDKafkaLogLevel::Info => {
+                info!(target: "librdkafka", "{fac} {message}")
+            }
+            RDKafkaLogLevel::Debug => debug!(target: "librdkafka", "{fac} {message}"),
+        }
+    }
+
+    fn error(&self, error: KafkaError, reason: &str) {
+        match error.rdkafka_error_code() {
+            Some(
+                RDKafkaErrorCode::BrokerTransportFailure
+                | RDKafkaErrorCode::AllBrokersDown
+                | RDKafkaErrorCode::Resolve,
+            ) => self.brokers.connection_failed(reason),
+            _ => error!(error = %error, reason, "Kafka client error"),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct KafkaSink {
+    producer: FutureProducer<KafkaContext>,
+    brokers: Arc<BrokerState>,
+}
+
 #[derive(Clone)]
 enum Sink {
-    Kafka(FutureProducer),
+    Kafka(KafkaSink),
     Log,
     Memory(MemorySink),
 }
@@ -336,7 +435,11 @@ impl Publisher {
                 client.set(key, value);
             }
         }
-        let producer: FutureProducer = client
+        let brokers = Arc::new(BrokerState::default());
+        let context = KafkaContext {
+            brokers: brokers.clone(),
+        };
+        let producer: FutureProducer<KafkaContext> = client
             .set("bootstrap.servers", &config.brokers)
             .set("client.id", &config.client_id)
             .set("acks", &config.acks)
@@ -352,11 +455,11 @@ impl Publisher {
             .set("message.timeout.ms", config.message_timeout_ms.to_string())
             // Wait briefly so records to the same partition are batched and compressed together.
             .set("linger.ms", "50")
-            .create()
+            .create_with_context(context)
             .map_err(PublishError::KafkaConfig)?;
         Ok(Self {
             topic: topic.into(),
-            sink: Sink::Kafka(producer),
+            sink: Sink::Kafka(KafkaSink { producer, brokers }),
         })
     }
 
@@ -382,6 +485,37 @@ impl Publisher {
         &self.topic
     }
 
+    /// Whether a broker connection has failed since the last delivery or answered probe.
+    /// Always false for the log and memory publishers.
+    pub fn brokers_unreachable(&self) -> bool {
+        match &self.sink {
+            Sink::Kafka(kafka) => kafka.brokers.failed.load(Ordering::Relaxed),
+            Sink::Log | Sink::Memory(_) => false,
+        }
+    }
+
+    /// Asks the brokers for the topic's metadata and returns whether they answered within
+    /// `timeout`. Always true for the log and memory publishers.
+    pub async fn probe(&self, timeout: Duration) -> bool {
+        let Sink::Kafka(kafka) = &self.sink else {
+            return true;
+        };
+        let producer = kafka.producer.clone();
+        let topic = self.topic.clone();
+        let answered = tokio::task::spawn_blocking(move || {
+            producer
+                .client()
+                .fetch_metadata(Some(&topic), timeout)
+                .is_ok()
+        })
+        .await
+        .unwrap_or(false);
+        if answered {
+            kafka.brokers.answered();
+        }
+        answered
+    }
+
     /// Encodes and publishes each sample as its own record keyed by device. All records
     /// are enqueued before waiting for acknowledgements so Kafka can batch them.
     /// Returns one result per sample, in order.
@@ -392,7 +526,7 @@ impl Publisher {
             .collect();
 
         match &self.sink {
-            Sink::Kafka(producer) => {
+            Sink::Kafka(KafkaSink { producer, brokers }) => {
                 let pending: Vec<_> = encoded
                     .into_iter()
                     .map(|record| {
@@ -419,7 +553,10 @@ impl Publisher {
                 for delivery in pending {
                     results.push(match delivery {
                         Ok(delivery) => match delivery.await {
-                            Ok(Ok(_)) => Ok(()),
+                            Ok(Ok(_)) => {
+                                brokers.answered();
+                                Ok(())
+                            }
                             Ok(Err((err, _))) => Err(PublishError::Kafka(err)),
                             Err(_) => Err(PublishError::Cancelled),
                         },

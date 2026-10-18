@@ -98,7 +98,16 @@ async fn reports_a_device_without_a_sunspec_map() {
         .await
         .expect_err("no map at a standard base");
 
-    assert!(matches!(err, PollerError::NoSunSpecMap(_)), "got {err:?}");
+    assert!(
+        matches!(err, PollerError::NoSunSpecMap { .. }),
+        "got {err:?}"
+    );
+    // The exception that explains the miss is in the error, since the reads log at debug.
+    assert_eq!(
+        err.to_string(),
+        "no SunSpec register map at base addresses [40000, 0, 50000] \
+         (last answer: Illegal data address)"
+    );
 }
 
 #[tokio::test]

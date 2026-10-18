@@ -227,7 +227,9 @@ Static devices in a config file can override the poll interval, request timeout,
 batch size and model selection per device; see
 [Polling profiles](docs/guides/polling-profiles.md).
 
-Logging is set with `RUST_LOG` (default `info`) and `SUNSPEC_LOG_FORMAT=text|json`.
+Logging is set with `RUST_LOG` (default `info`) and `SUNSPEC_LOG_FORMAT=text|json`. For more
+detail on the collector itself, use `RUST_LOG=info,collector_app=debug,poller_actor=debug`; a bare
+`debug` also turns on the libraries' debug output.
 
 The full reference is in [docs/configuration.md](docs/configuration.md). Starter files:
 [docs/config.example.toml](docs/config.example.toml) and
@@ -270,7 +272,8 @@ alerts are in [docs/guides/monitoring.md](docs/guides/monitoring.md).
   respected. The `HEALTHCHECK` calls `http://localhost:${SUNSPEC_METRICS_PORT:-9090}/healthz`.
 - **systemd**: [docs/sunspec-collector.service](docs/sunspec-collector.service) runs the binary
   from `/usr/local/bin/collector-app` with `Type=notify`, a 30 s watchdog, a dynamic unprivileged
-  user and `/var/lib/sunspec-collector` as its state directory. Settings come from
+  user and `/var/lib/sunspec-collector` as its state directory. A wrong setting exits with status
+  78, which the unit does not restart on, so the service stays failed with the error in the journal. Settings come from
   `/etc/sunspec-collector.env` (start from [docs/sunspec-collector.env](docs/sunspec-collector.env)).
 - **Releases**: `.github/workflows/release.yml` cross-compiles x86_64 and aarch64 binaries with
   `cross` and `docker/Dockerfile.cross`, packages them as archives and as multi-arch images, and

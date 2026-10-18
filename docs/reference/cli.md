@@ -47,6 +47,10 @@ logged at debug level. Every setting is described in [Configuration](../configur
 - **Ports:** `/metrics` and `/healthz` on `metrics.port` (default 9090). If the port cannot be
   bound, the collector exits at startup with an error containing `bind metrics port <port>`.
 - **Signals:** SIGINT and SIGTERM start a graceful shutdown.
-- **Exit status:** 0 after a graceful shutdown. Startup errors (configuration that does not load or
-  validate, a metrics port that cannot be bound, a buffer that cannot be opened, a Kafka producer
-  that cannot be created) are printed to stderr and the process exits with a non-zero status.
+- **Exit status:** 0 after a graceful shutdown. Startup errors are printed to stderr, and the
+  status says whether trying again can help:
+  - **78** (`EX_CONFIG`): a setting is wrong: configuration that does not load or validate, an
+    invalid `SUNSPEC_LOG_FORMAT`, or Kafka settings the producer rejects (such as an unreadable CA
+    file). The systemd unit does not restart on this status (`RestartPreventExitStatus=78`).
+  - **1**: anything else, such as a metrics port that cannot be bound or a buffer that cannot be
+    opened. These can pass, so the unit restarts the service.

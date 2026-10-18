@@ -122,7 +122,9 @@ Delivery is **at-least-once**.
 4. Rows that Kafka did not acknowledge within `kafka.timeout_ms` stay in the buffer. They are
    still the oldest rows, so they are retried first. Failed records count in
    `sunspec_uplink_errors_total`. After a batch in which nothing was delivered, the uplink backs
-   off (1 s, doubling, up to 30 s).
+   off (1 s, doubling, up to 30 s). If the records timed out while broker connections were
+   failing, it asks the brokers every 2 s during the backoff whether they answer, and ends the
+   backoff as soon as they do.
 5. Rows that can never be published (the payload is not valid JSON, or the sample cannot be
    encoded as Avro) are deleted, logged, and counted in
    `sunspec_buffer_dropped_total{reason="corrupt"}`, so they cannot block the queue.
@@ -398,7 +400,9 @@ While Kafka is unreachable:
 
 - the uplink retries the oldest batch with backoff (1 s doubling to 30 s), and each attempt waits
   up to `kafka.timeout_ms` for acknowledgements. `sunspec_uplink_errors_total` increases with each
-  attempt;
+  attempt, and each attempt logs `records not delivered; they stay buffered`. librdkafka's
+  reconnect attempts are logged at warn at most once per 5 minutes (`Kafka broker connection
+  failed`);
 - polling and ingest carry on, so `sunspec_buffer_rows` and `sunspec_buffer_oldest_age_seconds`
   rise;
 - once the limits are reached, retention drops the oldest rows
@@ -407,9 +411,10 @@ While Kafka is unreachable:
 
 When Kafka is reachable again:
 
-1. The next attempt (at most 30 s later) succeeds, and the uplink then drains back to back while
-   the batches come back full. It pauses for `buffer.drain_interval_ms` only once a batch is not
-   full, that is, when the backlog is gone.
+1. The uplink asks the brokers every 2 s whether they are back, so it starts draining within about
+   2 s of them answering rather than waiting out the rest of a 30 s backoff, and logs `records
+   delivered again`. It then drains back to back while the batches come back full. It pauses for
+   `buffer.drain_interval_ms` only once a batch is not full, that is, when the backlog is gone.
 2. Rows are sent oldest first, so the newest data arrives last. Consumers receive records with old
    `collected_at_ms` values for a while.
 3. Watch `sunspec_buffer_rows` and `sunspec_buffer_oldest_age_seconds` fall. The drain only makes

@@ -14,6 +14,21 @@ use crate::health::Health;
 
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
+/// While backing off from records that timed out, how often to ask the brokers whether
+/// they answer again.
+const PROBE_INTERVAL: Duration = Duration::from_secs(2);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Why a drain delivered nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrainFailure {
+    /// The buffer could not be read.
+    Buffer,
+    /// Kafka rejected records.
+    Rejected,
+    /// Kafka never answered for any record within `kafka.timeout_ms`.
+    TimedOut,
+}
 
 #[derive(Debug, Clone)]
 pub struct UplinkConfig {
@@ -35,22 +50,34 @@ pub async fn run(
     health: Arc<Health>,
 ) {
     let mut failures = 0u32;
+    let mut last_failure = None;
     let mut backlog = false;
 
     loop {
         health.uplink.beat();
         let delay = next_delay(failures, backlog, config.drain_interval);
+        let probe = last_failure == Some(DrainFailure::TimedOut);
         tokio::select! {
-            _ = sleep(delay) => {}
+            _ = pause(delay, probe, &publisher) => {}
             _ = stop.wait_for(|stop| *stop) => break,
         }
         match drain_once(&buffer, &publisher, config.batch_size).await {
             Ok(processed) => {
+                if processed > 0
+                    && matches!(
+                        last_failure,
+                        Some(DrainFailure::Rejected | DrainFailure::TimedOut)
+                    )
+                {
+                    info!(failed_attempts = failures, "records delivered again");
+                }
                 failures = 0;
+                last_failure = None;
                 backlog = processed as i64 >= config.batch_size;
             }
-            Err(()) => {
+            Err(failure) => {
                 failures = failures.saturating_add(1);
+                last_failure = Some(failure);
                 backlog = false;
             }
         }
@@ -70,6 +97,30 @@ pub async fn run(
         }
     }
     info!("uplink stopped");
+}
+
+/// Waits `delay` before the next drain. With `probe`, after records timed out while
+/// broker connections were failing, it asks the brokers every [`PROBE_INTERVAL`] whether
+/// they answer and returns as soon as they do, so a backlog starts draining within
+/// seconds of an outage ending rather than after the rest of the backoff (up to 30 s).
+async fn pause(delay: Duration, probe: bool, publisher: &Publisher) {
+    if !probe || !publisher.brokers_unreachable() {
+        sleep(delay).await;
+        return;
+    }
+    let deadline = tokio::time::Instant::now() + delay;
+    loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if left <= PROBE_INTERVAL {
+            sleep(left).await;
+            return;
+        }
+        sleep(PROBE_INTERVAL).await;
+        if publisher.probe(PROBE_TIMEOUT).await {
+            debug!("Kafka brokers answered; draining before the backoff ends");
+            return;
+        }
+    }
 }
 
 fn next_delay(failures: u32, backlog: bool, drain_interval: Duration) -> Duration {
@@ -94,9 +145,10 @@ async fn drain_once(
     buffer: &BufferStore,
     publisher: &Publisher,
     batch_size: i64,
-) -> Result<usize, ()> {
+) -> Result<usize, DrainFailure> {
     let batch = buffer.dequeue_batch(batch_size).await.map_err(|err| {
         warn!(error = %err, "buffer dequeue failed");
+        DrainFailure::Buffer
     })?;
     if batch.is_empty() {
         return Ok(0);
@@ -122,6 +174,7 @@ async fn drain_once(
     let results = publisher.publish(&samples).await;
     let mut acked = Vec::with_capacity(samples.len());
     let mut undelivered = 0usize;
+    let mut all_timed_out = true;
     let mut last_error = None;
     for (id, result) in sample_ids.into_iter().zip(results) {
         match result {
@@ -133,6 +186,7 @@ async fn drain_once(
             }
             Err(err) => {
                 undelivered += 1;
+                all_timed_out &= err.is_timeout();
                 last_error = Some(err);
             }
         }
@@ -158,7 +212,11 @@ async fn drain_once(
         counter!("sunspec_uplink_errors_total").increment(undelivered as u64);
         warn!(undelivered, error = %err, "records not delivered; they stay buffered");
         if acked.is_empty() {
-            return Err(());
+            return Err(if all_timed_out {
+                DrainFailure::TimedOut
+            } else {
+                DrainFailure::Rejected
+            });
         }
     }
     debug!(
