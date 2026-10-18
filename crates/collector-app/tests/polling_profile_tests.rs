@@ -229,17 +229,27 @@ fn invalid_profile_settings_are_rejected() {
     }
 }
 
-/// Every TOML and JSON example in these sections of docs/configuration.md must load
-/// and validate, so the documentation cannot drift from the code.
+/// Every TOML and JSON example in the polling profiles guide and in the complete
+/// examples of the configuration reference must load and validate, so the documentation
+/// cannot drift from the code.
 #[test]
 fn documented_config_examples_are_valid() {
     let _guard = ENV_LOCK.lock().expect("env lock");
-    let docs = std::fs::read_to_string(repo_path("docs/configuration.md")).expect("read docs");
     let mut checked = 0;
-    for section in ["## Polling profiles", "## Complete examples"] {
-        let start = docs.find(section).expect(section);
-        let rest = &docs[start + section.len()..];
-        let body = &rest[..rest.find("\n## ").unwrap_or(rest.len())];
+    for (file, section) in [
+        ("docs/guides/polling-profiles.md", None),
+        ("docs/configuration.md", Some("## Complete examples")),
+    ] {
+        let docs = std::fs::read_to_string(repo_path(file)).expect(file);
+        let body = match section {
+            Some(section) => {
+                let start = docs.find(section).expect(section);
+                let rest = &docs[start + section.len()..];
+                &rest[..rest.find("\n## ").unwrap_or(rest.len())]
+            }
+            None => docs.as_str(),
+        };
+        let section = section.unwrap_or(file);
         for (index, block) in body.split("```").enumerate().skip(1).step_by(2) {
             let Some((lang, content)) = block.split_once('\n') else {
                 continue;

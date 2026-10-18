@@ -1,22 +1,58 @@
 name: Deploy Docs
 
+# Builds the mdBook site and checks its links (mdbook-linkcheck) on pull requests that change
+# the docs, and deploys it to GitHub Pages on pushes to main.
 on:
   push:
     branches: ["main"]
     paths:
       - "docs/**"
       - "README.md"
+      - "CHANGELOG.md"
+      - ".github/workflows/deploy-docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - ".github/workflows/deploy-docs.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('docs-{0}', github.event.pull_request.number) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  build:
+    name: Build and check links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup mdBook
+        uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
+        with:
+          mdbook-version: '0.4.40'
+
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: mdbook-linkcheck@0.7.7
+
+      # With the linkcheck backend the HTML goes to docs/book/html; a broken link fails here.
+      - name: Build with mdBook
+        run: mdbook build docs
+
+      - name: Upload artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: docs/book/html
+
   deploy:
+    name: Deploy
+    needs: build
+    if: github.event_name != 'pull_request'
     # Publishing to Pages needs the Pages write scope and an OIDC token.
     permissions:
       contents: read
@@ -27,22 +63,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Setup mdBook
-        uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
-        with:
-          mdbook-version: '0.4.40'
-
-      - name: Build with mdBook
-        run: mdbook build docs
-
       - name: Setup Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: docs/book
 
       - name: Deploy to GitHub Pages
         id: deployment

@@ -53,7 +53,7 @@ default silently. The following are errors:
 - Out-of-range values: zero ports, intervals, timeouts and sizes where at least 1 is required,
   `modbus.max_batch_size` outside 1–125, an invalid CIDR subnet, an empty unit ID list, an invalid
   Kafka topic name, an empty broker list.
-- Model settings (see [Polling profiles](#polling-profiles)): a model ID outside 1–65534, an empty
+- Model settings (see [Polling profiles](guides/polling-profiles.md#polling-profiles)): a model ID outside 1–65534, an empty
   `include_models`, a model in both `include_models` and `exclude_models`, a `model_intervals_s`
   entry of 0, and a static device listed twice.
 - A `framing` other than `tcp` or `rtu`, and static devices behind the same RTU converter (same
@@ -169,7 +169,7 @@ non-empty, no scan runs and `subnet`, `max_concurrency`, `per_host_timeout_ms`, 
 | `poller.stall_timeout_ms` | `SUNSPEC_STALL_TIMEOUT_MS` | max(10 × poll interval, 30000) | A session with no successful read for this long is ended and restarted (counted in `sunspec_poller_stalls_total`). Cycles in which no model is due do not count. ≥ 1 when set. |
 | `poller.include_models` | `SUNSPEC_INCLUDE_MODELS` | unset (every model) | Poll only these models, e.g. `[1, 103, 160]`; the rest of the chain is discovered but never read. Model IDs 1–65534, at least one. Env form: comma list; empty means every model. |
 | `poller.exclude_models` | `SUNSPEC_EXCLUDE_MODELS` | empty | Never poll these models. A model cannot also be in `include_models`. Env form: comma list. |
-| `poller.model_intervals_s` | `SUNSPEC_MODEL_INTERVALS_S` | empty | Read these models at most once per interval instead of every cycle: a table of model ID = seconds (≥ 1). Env form: `1=3600,120=3600`. See [Polling profiles](#polling-profiles). |
+| `poller.model_intervals_s` | `SUNSPEC_MODEL_INTERVALS_S` | empty | Read these models at most once per interval instead of every cycle: a table of model ID = seconds (≥ 1). Env form: `1=3600,120=3600`. See [Polling profiles](guides/polling-profiles.md#polling-profiles). |
 
 A sample that cannot be queued for ingest within one poll interval is dropped and counted in
 `sunspec_samples_dropped_total{reason="channel_full"}`, so a slow buffer never blocks polling.
@@ -188,7 +188,7 @@ sessions are retried with the backoff described under `runtime.respawn_delay_ms`
 | `modbus.retry_backoff_ms` | — | `100` | Delay before the first retry; doubles on each further retry. ≥ 1. |
 | `modbus.retry_max_backoff_ms` | — | `2000` | Upper bound for the retry delay. ≥ 1. |
 | `modbus.inter_read_delay_ms` | — | unset | Pause between the requests of one split read, for devices that need it. ≥ 1 when set. |
-| `modbus.framing` | `SUNSPEC_MODBUS_FRAMING` | `tcp` | `tcp` for Modbus TCP, or `rtu` for Modbus RTU frames over TCP, as a transparent serial-to-Ethernet converter in front of an RS-485 bus passes them. Units on the same host and port then share one connection; see [Serial devices through a converter](ops.md#serial-devices-through-a-converter). |
+| `modbus.framing` | `SUNSPEC_MODBUS_FRAMING` | `tcp` | `tcp` for Modbus TCP, or `rtu` for Modbus RTU frames over TCP, as a transparent serial-to-Ethernet converter in front of an RS-485 bus passes them. Units on the same host and port then share one connection; see [Serial devices through a converter](guides/troubleshooting.md#serial-devices-through-a-converter). |
 
 With the defaults, one request to an unresponsive device takes up to three timeouts plus 300 ms of
 backoff before it fails. Keep `poller.request_timeout_ms × (retry_count + 1)` well below the poll
@@ -265,7 +265,7 @@ Rules checked at startup:
 
 GSSAPI (Kerberos) and OAUTHBEARER are not supported. Certificates are read at startup; restart the
 collector after rotating them (the buffer keeps unsent data across the restart). See
-[Securing the Kafka connection](ops.md#securing-the-kafka-connection) for deployment examples.
+[Securing the Kafka connection](guides/kafka-security.md#securing-the-kafka-connection) for deployment examples.
 
 ### `[metrics]`
 
@@ -338,94 +338,13 @@ SUNSPEC_STATIC_DEVICES=192.168.1.100:1,192.168.1.100:2,192.168.1.100:3
 not to static entries.
 
 Each host and unit ID may be listed only once. Entries in a config file can also carry
-[per-device settings](#per-device-settings).
+[per-device settings](guides/polling-profiles.md#per-device-settings).
 
 ---
 
 ## Polling profiles
 
-By default every discovered model is read on every poll cycle. Models that rarely change, such as
-common (1), nameplate (120) and settings (121), can be read less often, and models you do not need
-can be skipped. Both cut Modbus traffic and Kafka volume.
-
-```toml
-[poller]
-poll_interval_ms = 1000
-exclude_models = [123]            # never read the immediate controls model
-
-[poller.model_intervals_s]        # model ID = seconds
-1 = 3600                          # common: hourly
-120 = 3600                        # nameplate: hourly
-121 = 600                         # settings: every 10 minutes
-```
-
-The same in the environment (for the systemd environment file or Docker):
-
-```sh
-SUNSPEC_MODEL_INTERVALS_S=1=3600,120=3600,121=600
-SUNSPEC_EXCLUDE_MODELS=123
-```
-
-How the schedule works:
-
-- Every polled model is read on the first cycle of a session, so a device's identity and settings
-  are published as soon as it connects. After a successful read, a model with an interval is read
-  again on the first cycle at least that long later. A failed read is retried on the next cycle.
-- Intervals are counted in whole poll cycles: with `poll_interval_ms = 1000`, `121 = 600` reads
-  model 121 every 600th cycle.
-- A new session (after a reconnect, a stall or repeated failures) reads every model again, so a
-  slow model can be read more often than its interval while a device is unstable.
-- A cycle in which nothing is due does not contact the device and does not count towards the stall
-  timeout.
-- `include_models` and `exclude_models` filter the discovered chain. Listing a model that a device
-  does not have is not an error. If nothing on a device is selected, its session ends with
-  `none of the discovered models [...] is selected for polling` and is retried with the usual
-  backoff; the chain is rediscovered each time, so a firmware update that adds a model is noticed.
-- Discovery still reads every model header. The `discovered SunSpec models` log line lists the
-  whole chain (`models`), the models that are polled (`polled`) and the slow ones (`slow`).
-
-### Per-device settings
-
-A `[[discovery.static_devices]]` entry in a config file can override these settings for that
-device:
-
-| Key | Overrides | Notes |
-|-----|-----------|-------|
-| `poll_interval_ms` | `poller.poll_interval_ms` | ≥ 1. The device's default stall timeout follows it. |
-| `request_timeout_ms` | `poller.request_timeout_ms` | ≥ 1. |
-| `base_address` | `sunspec.base_address` | Probed first; the standard bases follow. |
-| `max_batch_size` | `modbus.max_batch_size` | 1–125. |
-| `framing` | `modbus.framing` | `tcp` or `rtu`. |
-| `include_models` | `poller.include_models` | Replaces the global list. |
-| `exclude_models` | `poller.exclude_models` | Replaces the global list; `[]` clears it for this device. |
-| `model_intervals_s` | `poller.model_intervals_s` | Merged model by model; the device's entries win. |
-
-```toml
-[poller.model_intervals_s]
-1 = 3600
-120 = 3600
-
-[[discovery.static_devices]]
-ip = "192.168.1.30"               # a slow meter behind a serial gateway
-unit_id = 2
-poll_interval_ms = 5000
-request_timeout_ms = 3000
-max_batch_size = 60
-
-[[discovery.static_devices]]
-ip = "192.168.1.40"               # an inverter at unit 126 with MPPT data every 10 s
-unit_id = 126
-include_models = [1, 120, 160]
-model_intervals_s = { 1 = 86400, 160 = 10 }   # merged: 1 daily, 120 hourly, 160 every 10 s
-```
-
-- Per-device settings exist only in the config file. `SUNSPEC_STATIC_DEVICES` replaces the file's
-  device list together with these settings, and logs a warning when it does.
-- Devices found by a subnet scan use the global settings.
-- After its overrides are applied, a device's `include_models` and `exclude_models` may not share a
-  model; the error names the device.
-
----
+See [Polling profiles](guides/polling-profiles.md), including per-device settings.
 
 ## Logging
 
@@ -451,19 +370,7 @@ Useful debug targets:
 
 ## Command-line options
 
-| Option | Effect |
-|--------|--------|
-| `--config PATH`, `--config=PATH` | Read this config file. Overrides `SUNSPEC_CONFIG`. |
-| `--print-schema` | Print the Avro schema of the published records as JSON and exit. No configuration is loaded. |
-| `--print-models` | Print the metadata of every bundled SunSpec model (points with type, units, label, description, and enum and bitfield symbols) as JSON and exit. |
-| `--probe HOST[:UNIT]` | Read one device's SunSpec map once, print it as JSON and exit; see [Probing a device](ops.md#probing-a-device). Uses the port, timeouts, base address and static-device overrides from the configuration. |
-| `--keep-identifiers` | With `--probe`: keep serial numbers and network addresses instead of blanking them. |
-| `--version`, `-V` | Print `collector-app <version>` and exit. |
-| `--help`, `-h` | Print a short usage summary and exit. |
-
-Other arguments are ignored.
-
----
+See [Command-line options](reference/cli.md).
 
 ## Complete examples
 

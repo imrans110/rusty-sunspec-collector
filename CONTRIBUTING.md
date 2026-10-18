@@ -97,7 +97,7 @@ the multi-arch images without publishing them.
   (`uses: owner/action@<sha> # v1.2.3`), keep the top-level `permissions` at `contents: read`
   and grant more per job; pin Docker base images by digest. Dependabot keeps the pins current.
 - If you change the decoder, the model-chain walk or config parsing, run the matching fuzz target
-  for a few minutes (see [Fuzzing](docs/DEVELOPER_GUIDE.md#fuzzing)); CI fuzzes such PRs for two minutes too.
+  for a few minutes (see [Fuzzing](docs/contributing/fuzzing.md)); CI fuzzes such PRs for two minutes too.
 - All CI checks must pass before a PR is merged. A PR that changes only documentation (other
   than the docs files the tests read) skips the build, test and Docker jobs; see the CI section
   of the [Developer Guide](docs/DEVELOPER_GUIDE.md#ci).

@@ -4,8 +4,8 @@ The collector writes every sample to a local SQLite database before it publishes
 Kafka. This page describes what is in that database, how rows move through it, how to size it,
 and how to inspect and maintain it safely.
 
-Settings referred to here are described in [Configuration](configuration.md#buffer); metrics and
-alerts are in [Operations](ops.md#metrics-reference).
+Settings referred to here are described in [Configuration](configuration.md#buffer); metrics are in
+[Metrics](reference/metrics.md) and alerts in [Monitoring and alerts](guides/monitoring.md).
 
 ---
 
@@ -171,7 +171,7 @@ disk).
 ### Rows per second
 
 Every polled model of every device produces one row per poll interval, and a model with a
-[polling profile](configuration.md#polling-profiles) interval one row per interval:
+[polling profile](guides/polling-profiles.md#polling-profiles) interval one row per interval:
 
 ```
 rows per second = devices × (models polled every cycle ÷ poll interval in seconds

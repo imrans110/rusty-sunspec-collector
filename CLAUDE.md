@@ -66,8 +66,8 @@ the owner's approval). On a tag (and on manual runs) it attests the release file
 
 On pull requests, a `Changes` job gates the jobs: Check & Lint, Test and Docker E2E run only
 when code changed (crates, Cargo files, Docker files, compose, `fixtures/`, `ci.yml`, or the docs
-files tests read: `docs/configuration.md`, `docs/config.example.toml`,
-`docs/sunspec-collector.env`); Security Audit only when a `Cargo.toml`, `Cargo.lock` or `ci.yml`
+files tests read: `docs/configuration.md`, `docs/guides/polling-profiles.md`, `docs/SUMMARY.md`,
+`docs/reference/models/`, `docs/config.example.toml`, `docs/sunspec-collector.env`); Security Audit only when a `Cargo.toml`, `Cargo.lock` or `ci.yml`
 changed. Skipped required jobs count as passing. Keep the list in `ci.yml` in step when tests or
 the image start reading another file. `audit.yml` audits `main` daily. `scorecard.yml` runs
 OpenSSF Scorecard (README badge, Security tab); it must stay minimal (no top-level env or
@@ -178,6 +178,12 @@ the default buffer is `/app/data/sunspec-buffer.sqlite` (the `/app/data` volume)
 ## Documentation
 
 Docs live in `docs/` and are built with mdBook (`docs/SUMMARY.md`); links between pages are
-relative. Keep `README.md`, `docs/configuration.md`, `docs/config.example.toml`,
-`docs/sunspec-collector.env` and `docs/ops.md` (metrics) in sync with the code, and record
-user-visible changes in `CHANGELOG.md`.
+relative. The site is organized by task: `getting-started/`, `guides/`, `reference/`,
+`contributing/` and `project/`, with the larger pages (`configuration.md`, `ARCHITECTURE.md`,
+`DEVELOPER_GUIDE.md`, `build.md`, `buffer_maintenance.md`) at the top of `docs/`. Keep `README.md`,
+`docs/configuration.md`, `docs/guides/polling-profiles.md`, `docs/config.example.toml`,
+`docs/sunspec-collector.env` and `docs/reference/metrics.md` in sync with the code, and record
+user-visible changes in `CHANGELOG.md`. `docs/reference/models/` is generated from the bundled
+definitions (`UPDATE_MODEL_DOCS=1 cargo test -p sunspec-parser --test models_docs`); a test fails
+when it is stale. Deploy Docs builds the site with mdbook-linkcheck on docs PRs, so broken links
+fail there.

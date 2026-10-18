@@ -72,63 +72,18 @@ time, the decoded points and the raw registers. Consumers can deduplicate on
 
 ## Quick start
 
-### Docker Compose (no hardware needed)
-
-```sh
-docker compose up --build
-```
-
-This starts Kafka, a simulator with two units, the collector and Prometheus. Then:
-
-```sh
-curl localhost:9090/healthz          # 200 with a JSON body while the pipeline is running
-curl -s localhost:9090/metrics | grep '^sunspec_'
-```
-
-Prometheus is on <http://localhost:9091>; Kafka is reachable from the host at `localhost:29092`
-(topic `sunspec.telemetry`). `docker compose down -v` stops the stack and removes its volumes.
-
-### Local build
-
-Prerequisites: Rust 1.88+, cmake and a C toolchain, pkg-config, and the OpenSSL and libcurl
-development headers (`libssl-dev` and `libcurl4-openssl-dev` on Debian and Ubuntu). librdkafka is
-built from source; SQLite and zstd are bundled.
-
-```sh
-cargo build --workspace
-cargo test --workspace
-
-# Terminal 1: simulated devices
-cargo run -p sunspec-sim -- --bind 127.0.0.1:1502 --units 1,2
-
-# Terminal 2: the collector (no Kafka configured, so each record's key and size is logged
-# at debug level instead of being published)
-SUNSPEC_STATIC_DEVICES=127.0.0.1:1,127.0.0.1:2 SUNSPEC_PORT=1502 \
-  RUST_LOG=info,avro_kafka=debug cargo run -p collector-app
-```
-
-Set `SUNSPEC_KAFKA_BROKERS` to publish to a broker, for example `localhost:29092` while the
-Compose stack is running.
-
----
+Try it in a few minutes with simulated devices: see [Quick start](getting-started/quickstart.md).
 
 ## Where to go next
 
-| Page | Read it for |
-|------|-------------|
-| [Developer Guide](DEVELOPER_GUIDE.md) | Prerequisites, building, testing, the simulator, CI |
-| [Building & Packaging](build.md) | Release builds, Docker images, aarch64 cross-compilation |
-| [Configuration](configuration.md) | Every setting, its environment variable, default and validation rules |
-| [Architecture](ARCHITECTURE.md) | Crates, tasks, data flow and design decisions |
-| [Operations](ops.md) | Deployment with systemd or Docker, metrics, alerts, troubleshooting |
-| [Buffer Maintenance](buffer_maintenance.md) | Inspecting and maintaining the SQLite buffer |
-
-### Background
-
-| Page | Contents |
-|------|----------|
-| [Design Plan](plan.md) | Original design notes and backlog |
-| [Code Review & Audit](CODE_REVIEW.md) | Audit findings and how they were resolved |
+| Section | Pages |
+|---------|-------|
+| Get started | [Quick start](getting-started/quickstart.md) with simulated devices; [Deployment](getting-started/deployment.md) with Docker or systemd, shutdown and logs |
+| Guides | [Securing the Kafka connection](guides/kafka-security.md), [Serial devices through a converter](guides/serial-devices.md), [Polling profiles](guides/polling-profiles.md), [Probing a device](guides/probing-a-device.md), [Verifying a release](guides/verifying-a-release.md), [Monitoring and alerts](guides/monitoring.md), [Buffer maintenance](buffer_maintenance.md), [Troubleshooting](guides/troubleshooting.md), [Upgrade notes](guides/upgrading.md) |
+| Reference | [Configuration](configuration.md), [Command-line options](reference/cli.md), [HTTP endpoints](reference/http-endpoints.md), [Metrics](reference/metrics.md), [Record format](reference/record-format.md), [Supported SunSpec models](reference/models/README.md) |
+| How it works | [Architecture](ARCHITECTURE.md): crates, tasks, data flow and design decisions |
+| Contributing | [Developer Guide](DEVELOPER_GUIDE.md), [Building & Packaging](build.md), [Fuzzing](contributing/fuzzing.md) |
+| Project | [Changelog](project/changelog.md), [Design Plan](plan.md), [Code Review & Audit](CODE_REVIEW.md) |
 
 ---
 

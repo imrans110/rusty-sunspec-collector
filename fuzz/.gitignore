@@ -1,6 +1,6 @@
 target
 # Copied from the workspace's Cargo.lock by .clusterfuzzlite/build.sh (and by hand, see the
-# Fuzzing section of docs/DEVELOPER_GUIDE.md).
+# docs/contributing/fuzzing.md).
 Cargo.lock
 corpus
 artifacts

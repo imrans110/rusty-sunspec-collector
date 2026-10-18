@@ -4,7 +4,7 @@ Everything needed to build, run, test and change Rusty SunSpec Collector.
 
 For release builds, Docker images and cross-compiling see [Building & Packaging](build.md). For
 configuration options see [Configuration](configuration.md), for the system design see
-[Architecture](ARCHITECTURE.md), and for deployment see [Operations](ops.md).
+[Architecture](ARCHITECTURE.md), and for deployment see [Deployment](getting-started/deployment.md).
 
 ---
 
@@ -400,13 +400,14 @@ changed.
 
 Other workflows: `audit.yml` is the daily audit above, `release.yml` builds and tests the
 release archives and images, and publishes them on a `v*` tag (see
-[Building & Packaging](build.md#release-workflow)), `deploy-docs.yml` publishes this book to
-GitHub Pages on pushes to `main` that touch `docs/` or `README.md` (mdBook 0.4.40), and
+[Building & Packaging](build.md#release-workflow)), `deploy-docs.yml` builds this book with
+mdbook-linkcheck on pull requests that change the docs and publishes it to GitHub Pages on pushes
+to `main` that touch `docs/`, `README.md` or `CHANGELOG.md` (mdBook 0.4.40), and
 `scorecard.yml` runs [OpenSSF Scorecard](https://scorecard.dev/) weekly and on pushes to `main`,
 publishing the score behind the README badge and the findings to the repository's Security tab.
 `codeql.yml` runs CodeQL on the Rust code and on the workflows (pull requests that change code or
 workflows, every push to `main`, weekly), and `fuzz.yml` runs the fuzz targets (see
-[Fuzzing](#fuzzing)). Neither is required for merging; CodeQL's check on a pull request lists the
+[Fuzzing](contributing/fuzzing.md#fuzzing)). Neither is required for merging; CodeQL's check on a pull request lists the
 alerts it adds, and the Security tab has all of them.
 
 Workflow hygiene, which Scorecard checks:
@@ -444,50 +445,7 @@ one.
 
 ## Fuzzing
 
-`fuzz/` holds [cargo-fuzz](https://rust-fuzz.github.io/book/cargo-fuzz.html) targets for the
-code that reads input the collector does not control:
-
-| Target | Input | Checks |
-|--------|-------|--------|
-| `decode_model` | A bundled model ID and arbitrary registers | `decode_model_labeled` does not panic, agrees with `decode_model`, names each point once, labels only existing points, and returns only finite floats |
-| `model_chain` | An arbitrary register map at the configured or a standard base | `discover_models` ends with a chain or an error; an accepted chain starts with `SunS`, has at most 256 contiguous models and ends with `0xFFFF`; each model it finds decodes without panicking |
-| `config` | An arbitrary config file, loaded as TOML and as JSON | `CollectorConfig::from_file_contents`, `validate()` and `device_config()` return errors instead of panicking |
-
-`discover_models` reads through the `ReadRegisters` trait, which the target implements with an
-in-memory register map, so the chain walk runs without a network. The config target skips inputs
-that could name a `*_file` setting, since loading reads those files.
-
-`fuzz/` is its own workspace (it needs nightly Rust and sanitizers), so the workspace commands
-above do not build it. It has no committed lockfile: builds copy the workspace's `Cargo.lock`
-into `fuzz/` first, so the targets use the same dependency versions as the collector, and only
-one lockfile needs updates. To run a target locally:
-
-```sh
-rustup toolchain install nightly
-cargo install cargo-fuzz --locked
-cp Cargo.lock fuzz/                          # build against the workspace's locked versions
-fuzz/seeds.py fuzz/seeds                     # seed corpora from fixtures/ and the example config
-cargo +nightly fuzz run -O decode_model fuzz/corpus/decode_model fuzz/seeds/decode_model \
-  -- -max_total_time=300
-```
-
-A crash is saved under `fuzz/artifacts/<target>/`; `cargo +nightly fuzz run -O <target> <file>`
-replays it and `cargo +nightly fuzz tmin -O <target> <file>` shrinks it. Turn a fixed crash into
-a regression test in the crate's tests (see `values_that_are_not_finite_are_null` in
-`crates/sunspec-parser/tests/decode_tests.rs`, found by `decode_model`).
-
-In CI, `.github/workflows/fuzz.yml` uses [ClusterFuzzLite](https://google.github.io/clusterfuzzlite/):
-it builds the targets in the OSS-Fuzz Rust image (`.clusterfuzzlite/`) with AddressSanitizer and
-seed corpora from `fuzz/seeds.py`. It fuzzes for two minutes on pull requests that change the
-fuzzed code (`crates/sunspec-parser/`, `crates/poller-actor/`, `crates/collector-app/src/config.rs`)
-or the fuzzing setup (`fuzz/`, `.clusterfuzzlite/`, the workflow), and for half an hour every
-Sunday, which also covers dependency updates; the corpus is kept between runs as workflow
-artifacts. A crash fails the run and is uploaded with its input. When you add a target, add a
-`[[bin]]` to `fuzz/Cargo.toml`, add it to `targets` in `.clusterfuzzlite/build.sh`, add the code
-it fuzzes to the `paths` in `fuzz.yml`, and give it seeds in `fuzz/seeds.py` if the fixtures have
-useful input.
-
----
+See [Fuzzing](contributing/fuzzing.md).
 
 ## Adding a SunSpec model definition
 
@@ -503,7 +461,10 @@ is already bundled. To add a model published later, or to move to a newer commit
 3. If the model has repeating groups, count points or float points, add a value test for it.
    Point types the decoder does not know are published as null.
 4. Update the model tables in `crates/sunspec-parser/models/README.md` and
-   [Architecture](ARCHITECTURE.md#bundled-definitions), and add a CHANGELOG entry.
+   [Architecture](ARCHITECTURE.md#bundled-definitions), regenerate the docs' model pages
+   (`UPDATE_MODEL_DOCS=1 cargo test -p sunspec-parser --test models_docs`; a new range of model
+   IDs also needs a line in `CATEGORIES` there and in `docs/SUMMARY.md`), and add a CHANGELOG
+   entry.
 
 The simulator can then serve the model: `--models 1,103,<id>`, or `<id>:<len>` when the model
 has repeating groups (the bundled length only counts fixed groups).
@@ -550,7 +511,7 @@ Make sure it is listed in `[workspace] members` in the root `Cargo.toml`, inheri
   in `_seconds`.
 - Register HELP text for every new metric in `describe_metrics()`
   (`crates/collector-app/src/metrics_server.rs`) and add it to the metrics table in
-  [Operations](ops.md).
+  [Metrics](reference/metrics.md).
 - Per-device metrics use the `device` label with `DeviceIdentity::key()` (`host/unit`). Do not add
   labels with unbounded values (batch sizes, row IDs, error messages).
 
@@ -588,14 +549,28 @@ the change in the CHANGELOG.
 
 ## Documentation
 
-The documentation is an mdBook in `docs/` (`docs/SUMMARY.md` lists the pages). Links between pages
-are relative (`[Architecture](ARCHITECTURE.md)`).
+The documentation is an mdBook in `docs/` (`docs/SUMMARY.md` lists the pages). It is organized by
+what readers come to do: `getting-started/`, `guides/`, `reference/`, `contributing/` and
+`project/`, plus the larger pages at the top of `docs/` (configuration, architecture, this guide,
+building and packaging, buffer maintenance). Links between pages are relative
+(`[Architecture](ARCHITECTURE.md)` from the top, `[Metrics](../reference/metrics.md)` from a
+folder); the changelog page includes `CHANGELOG.md` from the repository root.
+
+`docs/reference/models/` is generated from the bundled SunSpec definitions, one page per group of
+model IDs plus an index. Do not edit it by hand: after changing the bundled models, run
+`UPDATE_MODEL_DOCS=1 cargo test -p sunspec-parser --test models_docs`. Without the variable the
+same test fails when the pages are stale or missing from `docs/SUMMARY.md`.
 
 ```sh
 cargo install mdbook --version 0.4.40 --locked
+cargo install mdbook-linkcheck --version 0.7.7 --locked   # optional: checks links and files
 mdbook serve docs --open    # local preview with reload
-mdbook build docs           # static site in docs/book
+mdbook build docs           # static site in docs/book (docs/book/html with mdbook-linkcheck)
 ```
+
+The Deploy Docs workflow runs the same build, with mdbook-linkcheck, on pull requests that change
+the docs, and deploys the site from `main`. A page that moves gets a redirect in `docs/book.toml`
+(`[output.html.redirect]`).
 
 ---
 
