@@ -100,7 +100,7 @@ upgrades). Set your devices and Kafka brokers there, then run
 and run `sudo sh install.sh`; `SUNSPEC_VERSION=0.5.0` picks a specific release. From 0.5.0 the
 release files and images carry signed build provenance; `gh attestation verify <file> --repo
 imrans110/rusty-sunspec-collector` checks a download (see
-[Verifying a release](docs/build.md#verifying-a-release)).
+[Verifying a release](docs/guides/verifying-a-release.md)).
 
 With Docker:
 
@@ -225,7 +225,7 @@ works with Docker secrets and systemd credentials; the compose stack authenticat
 
 Static devices in a config file can override the poll interval, request timeout, base address,
 batch size and model selection per device; see
-[Polling profiles](docs/configuration.md#polling-profiles).
+[Polling profiles](docs/guides/polling-profiles.md).
 
 Logging is set with `RUST_LOG` (default `info`) and `SUNSPEC_LOG_FORMAT=text|json`.
 
@@ -258,7 +258,8 @@ Metrics worth alerting on (per-device metrics have a `device="host/unit"` label)
 | `sunspec_buffer_dropped_total{reason}` | rows dropped without being published |
 | `sunspec_uplink_records_total`, `sunspec_uplink_errors_total` | records acknowledged / not acknowledged by Kafka |
 
-The full metric list and suggested alerts are in [docs/ops.md](docs/ops.md).
+The full metric list is in [docs/reference/metrics.md](docs/reference/metrics.md) and suggested
+alerts are in [docs/guides/monitoring.md](docs/guides/monitoring.md).
 
 ## Deployment
 
@@ -276,9 +277,11 @@ The full metric list and suggested alerts are in [docs/ops.md](docs/ops.md).
   tests the install script under systemd. Pushing a `v*` tag publishes the release.
 
 Step-by-step instructions: [docs/build.md](docs/build.md) (building and packaging),
-[docs/ops.md](docs/ops.md) (running, monitoring, troubleshooting) and
+[docs/getting-started/deployment.md](docs/getting-started/deployment.md) (running with Docker or
+systemd), [docs/guides/troubleshooting.md](docs/guides/troubleshooting.md) and
 [docs/buffer_maintenance.md](docs/buffer_maintenance.md) (the SQLite buffer). The documentation
-site is at <https://imrans110.github.io/rusty-sunspec-collector/>.
+site, organized as getting started, guides, reference (including every supported SunSpec model)
+and contributing, is at <https://imrans110.github.io/rusty-sunspec-collector/>.
 
 ## Workspace layout
 

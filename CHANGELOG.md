@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- The documentation site lists every supported SunSpec model with its points (type, units, label, description and enum and bitfield names), generated from the bundled definitions: Reference → Supported SunSpec models
+
+### Changed
+- The documentation site is reorganized by task: Get started (quick start, deployment), Guides (Kafka security, serial devices, polling profiles, probing a device, verifying a release, monitoring and alerts, buffer maintenance, troubleshooting, upgrade notes), Reference (configuration, command-line options, HTTP endpoints, metrics, record format, models), How it works, Contributing and Project (with the changelog). The Operations page was split up; its old URL redirects to Deployment, and moved sections leave a pointer at their old place. The site now follows the system light or dark setting, and each page links to its source for editing
+
 ## [0.5.0] - 2026-10-18
 
 ### Upgrade notes

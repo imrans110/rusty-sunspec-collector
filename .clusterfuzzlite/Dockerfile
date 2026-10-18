@@ -1,5 +1,5 @@
 # ClusterFuzzLite build image for the cargo-fuzz targets in fuzz/ (see the Fuzzing section of
-# docs/DEVELOPER_GUIDE.md): the OSS-Fuzz Rust builder, pinned by digest. cmake and the curl and
+# docs/contributing/fuzzing.md): the OSS-Fuzz Rust builder, pinned by digest. cmake and the curl and
 # OpenSSL headers build librdkafka, which the config target links through collector-app.
 FROM gcr.io/oss-fuzz-base/base-builder-rust:v1@sha256:3428d0a90b1e7efbe2ba947bd1d0c9a70594986b4b6553804547f1fb24cfc92f
 

@@ -51,12 +51,14 @@ jobs:
           while IFS= read -r file; do
             echo "changed: $file"
             case "$file" in
-              # Anything compiled, tested or built into images. The three docs files
-              # are read by tests (config examples and the shipped config and env file).
+              # Anything compiled, tested or built into images. The docs files are read
+              # by tests (config examples, the shipped config and env file, and the
+              # generated model pages with their table of contents).
               crates/* | Cargo.toml | Cargo.lock | rustfmt.toml | Cross.toml | \
               Dockerfile | .dockerignore | docker/* | docker-compose.yml | fixtures/* | \
               .github/workflows/ci.yml | \
-              docs/configuration.md | docs/config.example.toml | docs/sunspec-collector.env)
+              docs/configuration.md | docs/guides/polling-profiles.md | docs/SUMMARY.md | \
+              docs/reference/models/* | docs/config.example.toml | docs/sunspec-collector.env)
                 code=true ;;
             esac
             case "$file" in

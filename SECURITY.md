@@ -10,7 +10,7 @@ patched.
 From 0.5.0, the release archives, `install.sh`, `SHA256SUMS` and the GHCR images carry signed
 SLSA build provenance from the release workflow. Check them with
 `gh attestation verify <file or oci://image> --repo imrans110/rusty-sunspec-collector`; see
-[Verifying a release](docs/build.md#verifying-a-release).
+[Verifying a release](docs/guides/verifying-a-release.md).
 
 ## Reporting a vulnerability
 

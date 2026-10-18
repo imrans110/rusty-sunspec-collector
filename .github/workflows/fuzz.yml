@@ -4,7 +4,7 @@ name: Fuzzing
 # for two minutes on pull requests that change the fuzzed code or the fuzzing setup, and for half
 # an hour every week (which also covers dependency updates), keeping the corpus between runs as
 # workflow artifacts. A crash fails the run and is uploaded as an artifact with a reproducer. See
-# the Fuzzing section of docs/DEVELOPER_GUIDE.md.
+# docs/contributing/fuzzing.md.
 on:
   pull_request:
     paths:

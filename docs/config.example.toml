@@ -9,7 +9,7 @@ rescan_interval_s = 600           # subnet mode: rescan this often to find new d
 [[discovery.static_devices]]
 ip = "192.168.1.20"
 unit_id = 1
-# Per-device settings (see "Per-device settings" in docs/configuration.md):
+# Per-device settings (see "Per-device settings" in docs/guides/polling-profiles.md):
 # poll_interval_ms = 5000
 # request_timeout_ms = 2000
 # base_address = 40000

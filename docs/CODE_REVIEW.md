@@ -67,7 +67,6 @@ merged. The 17 findings below were fixed in #11–#17.
 
 ## February 2026 review (historical)
 
-
 ### Executive Summary
 
 Rusty SunSpec Collector is a well-architected Rust workspace with clean domain boundaries across 8 crates. The core design — actor-based polling, durable SQLite buffering, Avro/Kafka uplink — is sound.

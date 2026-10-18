@@ -8,8 +8,10 @@ title = "Rusty SunSpec Collector"
 [output.html]
 git-repository-url = "https://github.com/imrans110/rusty-sunspec-collector"
 site-url = "/rusty-sunspec-collector/"
-default-theme = "ayu"
+# Light by default; readers whose system is set to dark get ayu.
+default-theme = "light"
 preferred-dark-theme = "ayu"
+edit-url-template = "https://github.com/imrans110/rusty-sunspec-collector/edit/main/docs/{path}"
 # Renders ```mermaid blocks (the architecture diagram); see the file.
 additional-js = ["mermaid-init.js"]
 
@@ -27,3 +29,13 @@ heading_split = false
 [output.html.fold]
 enable = true
 level = 0
+
+# Pages that moved when the docs were reorganized by task.
+[output.html.redirect]
+"/ops.html" = "getting-started/deployment.html"
+
+# Checks every internal link and #anchor at build time (CI installs mdbook-linkcheck; a local
+# build without it skips the check). With two outputs the site is written to book/html.
+[output.linkcheck]
+optional = true
+follow-web-links = false

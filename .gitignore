@@ -21,3 +21,6 @@ fuzz/seeds/
 
 # Release archives and images (scripts/package-release.sh)
 /dist
+
+# mdBook output (mdbook build docs)
+/docs/book
