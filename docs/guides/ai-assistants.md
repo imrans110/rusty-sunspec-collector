@@ -8,7 +8,8 @@ readings and the official SunSpec definitions.
 
 It cannot change anything. The bridge only sends GET requests to the collector, and the collector
 itself only reads devices. It adds no listener to the collector and needs no extra settings there.
-It works with collector 0.5.0 or newer, which serves `/devices` and `/models`.
+The bridge is part of `collector-app` from 0.6.0. It works with collectors from 0.5.0, which
+serve `/devices` and `/models`.
 
 ## Tools
 

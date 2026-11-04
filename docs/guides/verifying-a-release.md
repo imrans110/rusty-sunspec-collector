@@ -8,11 +8,11 @@ artifact attestations are free for public repositories. To check a download with
 [GitHub CLI](https://cli.github.com/):
 
 ```sh
-gh attestation verify sunspec-collector-0.5.0-x86_64-unknown-linux-gnu.tar.gz \
+gh attestation verify sunspec-collector-0.6.0-x86_64-unknown-linux-gnu.tar.gz \
   --repo imrans110/rusty-sunspec-collector \
   --signer-workflow imrans110/rusty-sunspec-collector/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.5.0
-gh attestation verify oci://ghcr.io/imrans110/sunspec-collector:0.5.0 \
+  --source-ref refs/tags/v0.6.0
+gh attestation verify oci://ghcr.io/imrans110/sunspec-collector:0.6.0 \
   --repo imrans110/rusty-sunspec-collector
 ```
 
