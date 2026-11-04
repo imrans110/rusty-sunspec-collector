@@ -11,4 +11,4 @@ description = "SQLite WAL-mode durable message buffer"
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
+sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio"] }

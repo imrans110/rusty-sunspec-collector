@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Row, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 use thiserror::Error;
 use tracing::info;
 
@@ -168,20 +168,13 @@ impl BufferStore {
             return Ok(());
         }
 
-        let mut query = String::from("DELETE FROM telemetry_queue WHERE id IN (");
-        for (idx, _) in ids.iter().enumerate() {
-            if idx > 0 {
-                query.push_str(", ");
-            }
-            query.push('?');
-        }
-        query.push(')');
-
-        let mut statement = sqlx::query(&query);
+        let mut query = QueryBuilder::<Sqlite>::new("DELETE FROM telemetry_queue WHERE id IN (");
+        let mut list = query.separated(", ");
         for id in ids {
-            statement = statement.bind(id);
+            list.push_bind(*id);
         }
-        statement.execute(&self.pool).await?;
+        query.push(")");
+        query.build().execute(&self.pool).await?;
 
         Ok(())
     }
