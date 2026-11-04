@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A wrong setting now exits with status 78 instead of 1. Rerun `install.sh` to get the systemd unit with `RestartPreventExitStatus=78` (an edited unit is saved as `.service.bak`). Scripts or supervisors that check for exit status 1 after a configuration error should accept 78
 
 ### Added
+- Read-only MCP server for AI assistants: `collector-app --mcp URL` serves the Model Context Protocol on stdin and stdout for Claude Desktop, Claude Code and other MCP clients. Four tools answer from a running collector's `/devices`, `/models` and `/healthz` at `URL`: `list_devices`, `get_readings` (one device's latest values with labels, optionally one model), `explain_point` (a point's label, description, units and symbols, found by point or symbol name) and `collector_health`. It only sends GET requests, adds no listener to the collector, and works with collectors from 0.5.0; over SSH it runs on the gateway itself. Built on the official Rust MCP SDK (`rmcp`). See Guides → Connecting an AI assistant
 - The documentation site lists every supported SunSpec model with its points (type, units, label, description and enum and bitfield names), generated from the bundled definitions: Reference → Supported SunSpec models
 
 ### Changed

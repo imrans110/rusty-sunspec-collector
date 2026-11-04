@@ -76,6 +76,11 @@ flowchart LR
   and invalid values stop the collector at startup instead of falling back to defaults.
 - **Simulator included**: `sunspec-sim` serves SunSpec register maps over Modbus TCP, so the test
   suite and the Docker stack run without hardware.
+- **AI assistants, read-only**: `collector-app --mcp http://gateway:9090` is an MCP server for
+  Claude Desktop, Claude Code and other MCP clients. Its tools list devices, read live values with
+  their labels, explain a point from the SunSpec definitions and check health, all through GET
+  requests, so an assistant can never change a device setting. See
+  [Connecting an AI assistant](docs/guides/ai-assistants.md).
 - **Device probe and replay**: `collector-app --probe host:unit` dumps a device's SunSpec map as
   JSON (serial numbers blanked), `sunspec-sim --fixture` serves a dump again, and CI replays every
   dump in `fixtures/devices/`, so a device that has been reported stays tested.
@@ -247,7 +252,8 @@ the collector stops at startup with `bind metrics port <port>`.
   JSON (`/devices/<host>/<unit>` for one device).
 - `/models`: the bundled SunSpec models; `/models/<id>` gives one model's points with labels,
   units, descriptions and enum and bitfield symbols. It exposes device data, so keep the port on a
-  management network.
+  management network. The read-only MCP server (`--mcp`) uses these endpoints to answer an AI
+  assistant's questions.
 
 Metrics worth alerting on (per-device metrics have a `device="host/unit"` label):
 

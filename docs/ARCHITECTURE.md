@@ -70,7 +70,7 @@ binaries; everything else is a library.
 | `poller-actor` | The per-device lifecycle: `run_device()` supervises sessions (connect, discover the model chain, poll) with backoff and stall detection, and records per-device metrics. `discover_models()` walks the chain. |
 | `buffer` | `BufferStore`, a SQLite queue (sqlx 0.8): batched enqueue, dequeue of the oldest rows, delete by ID, row-count and age retention. |
 | `avro-kafka` | The record schema (`schemas/sunspec_sample.avsc`), single-object `encode`/`decode`, and `Publisher`, which sends to Kafka through rdkafka 0.39, only logs (no brokers configured), or keeps records in memory (tests). |
-| `collector-app` | The binary and a library (`collector_app::run`, `run_with_publisher`) with the orchestration modules: `config`, `devices`, `ingest`, `uplink`, `retention`, `health`, `metrics_server`, `systemd`. |
+| `collector-app` | The binary and a library (`collector_app::run`, `run_with_publisher`) with the orchestration modules: `config`, `devices`, `ingest`, `uplink`, `retention`, `health`, `metrics_server`, `systemd`, and `mcp`, the read-only MCP server behind `--mcp`. |
 | `sunspec-sim` | A SunSpec Modbus TCP simulator (library and `sunspec-sim` binary) with fault injection, used by the tests and the Docker Compose stack. |
 
 ### Dependency direction
@@ -489,6 +489,19 @@ the latest discovery, the polled models, and the latest `Sample` of each polled 
 every successful read, and pruned when a rediscovery drops a model). `GET /devices` and
 `GET /devices/{host}/{unit}` serialise these from the health registry; points keep definition
 order (`types::ordered_points`). Memory is bounded by one sample per device and model.
+
+### MCP server
+
+`collector-app --mcp URL` (`collector_app::mcp`) is a separate process an AI assistant starts. It
+serves the Model Context Protocol on stdin and stdout with the official Rust SDK (`rmcp`) and turns
+each tool call into one GET request to the collector at `URL`: `list_devices` and `get_readings`
+read `/devices`, `explain_point` reads `/models/{id}`, and `collector_health` reads `/healthz`. The
+requests use hyper's HTTP/1 client with a 5 s timeout per request. A failed request, an unknown
+device or an unknown model comes back as a tool error result, so the session stays usable.
+
+The design keeps AI out of the data path. The bridge has no write path, it adds no listener or
+setting to the collector, and the collector stays deterministic. Because stdout carries the
+protocol, logs go to stderr in this mode.
 
 ### systemd watchdog
 

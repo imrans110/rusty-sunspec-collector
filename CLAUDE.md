@@ -24,7 +24,8 @@ crates/
   buffer/          – SQLite (sqlx, WAL) queue: enqueue_batch, dequeue_batch, delete_batch, retention
   avro-kafka/      – schemas/sunspec_sample.avsc, encode/decode, Publisher (Kafka, log-only, memory)
   collector-app/   – Binary + library: config, devices, ingest, uplink, retention, health,
-                     metrics_server, systemd; entry points collector_app::run / run_with_publisher
+                     metrics_server, systemd, mcp (read-only MCP server, --mcp); entry points
+                     collector_app::run / run_with_publisher
   sunspec-sim/     – SunSpec Modbus TCP simulator (library + sunspec-sim binary) for tests and compose
 fuzz/              – cargo-fuzz targets (own workspace, nightly): decode_model, model_chain, config;
                      seeds.py; run in CI by ClusterFuzzLite (.clusterfuzzlite/, fuzz.yml)
@@ -157,6 +158,11 @@ Dockerfiles' digests.
 - **Live readings**: `DeviceHealth::snapshot()` holds the latest discovery and one `Sample` per
   polled model; `Health::devices()` serves them as `/devices` and `/devices/{host}/{unit}` on the
   metrics port (`health.rs`, `metrics_server.rs`).
+- **MCP server**: `collector-app --mcp URL` (`mcp.rs`, rmcp 3.8 over stdio) is a separate,
+  read-only process: tools `list_devices`, `get_readings`, `explain_point`, `collector_health`
+  each do one GET against the collector's `/devices`, `/models` or `/healthz` (hyper HTTP/1, 5 s
+  timeout). Failures are tool error results, never protocol errors. stdout is the protocol, so logs
+  go to stderr. It must stay read-only: no POST, no probing devices.
 - **Health**: `/healthz` is 200 while ingest and uplink heartbeats are under 120 s old; device
   outages do not affect it. The systemd watchdog is pinged only while healthy.
   `sunspec_device_up` is set to 0 when a device's poller starts, so never-reachable devices show 0.

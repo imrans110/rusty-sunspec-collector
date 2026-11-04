@@ -1,6 +1,8 @@
 # HTTP endpoints
 
-All four endpoints are served on `metrics.port` (default 9090) on all IPv4 interfaces.
+All four endpoints are served on `metrics.port` (default 9090) on all IPv4 interfaces. The
+read-only MCP server (`collector-app --mcp`) answers an AI assistant's questions from `/devices`,
+`/models` and `/healthz`; see [Connecting an AI assistant](../guides/ai-assistants.md).
 
 ## `/metrics`
 

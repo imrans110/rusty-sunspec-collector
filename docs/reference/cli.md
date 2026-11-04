@@ -7,6 +7,7 @@
 | `--print-models` | Print the metadata of every bundled SunSpec model (points with type, units, label, description, and enum and bitfield symbols) as JSON and exit. |
 | `--probe HOST[:UNIT]` | Read one device's SunSpec map once, print it as JSON and exit; see [Probing a device](../guides/troubleshooting.md#probing-a-device). Uses the port, timeouts, base address and static-device overrides from the configuration. |
 | `--keep-identifiers` | With `--probe`: keep serial numbers and network addresses instead of blanking them. |
+| `--mcp URL`, `--mcp=URL` | Run a read-only MCP server on stdin and stdout for an AI assistant, answering from the collector at `URL` (for example `http://10.0.4.2:9090`). No configuration is loaded; logs go to stderr (default level `warn`) and the server exits when stdin closes. See [Connecting an AI assistant](../guides/ai-assistants.md). |
 | `--version`, `-V` | Print `collector-app <version>` and exit. |
 | `--help`, `-h` | Print a short usage summary and exit. |
 

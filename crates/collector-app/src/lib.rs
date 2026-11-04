@@ -3,6 +3,7 @@ pub mod config;
 mod devices;
 pub mod health;
 mod ingest;
+pub mod mcp;
 pub mod metrics_server;
 pub mod probe;
 mod retention;

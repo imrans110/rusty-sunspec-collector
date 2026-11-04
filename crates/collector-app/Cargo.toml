@@ -20,6 +20,13 @@ metrics = "0.24"
 # Only the recorder: /metrics is served by our own axum server, so the HTTP listener and
 # push gateway (hyper, native-tls, openssl) are left out.
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
+# Read-only MCP server (--mcp): the official Rust SDK over stdio, and a plain HTTP/1 client
+# (hyper, already used by axum) for the collector's own endpoints.
+rmcp = { version = "3.8", default-features = false, features = ["server", "macros", "transport-io"] }
+schemars = "1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 
 modbus-client = { path = "../modbus-client" }
 sunspec-parser = { path = "../sunspec-parser" }
@@ -38,3 +45,4 @@ vendored-openssl = ["avro-kafka/vendored-openssl"]
 
 [dev-dependencies]
 sunspec-sim = { path = "../sunspec-sim" }
+rmcp = { version = "3.8", default-features = false, features = ["client", "transport-io"] }
