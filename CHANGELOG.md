@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-04
+
 ### Upgrade notes
 - A wrong setting now exits with status 78 instead of 1. Rerun `install.sh` to get the systemd unit with `RestartPreventExitStatus=78` (an edited unit is saved as `.service.bak`). Scripts or supervisors that check for exit status 1 after a configuration error should accept 78
 
