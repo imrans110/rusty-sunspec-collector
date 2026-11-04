@@ -148,3 +148,84 @@ fn a_startup_failure_that_can_pass_exits_with_1() {
     assert_eq!(output.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("bind metrics port"), "{stderr}");
 }
+
+// An assistant starts `collector-app --mcp URL` and speaks JSON-RPC on its stdin and stdout.
+// Every stdout line must be protocol JSON: logs go to stderr.
+#[test]
+fn mcp_mode_speaks_json_rpc_on_stdio() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::Stdio;
+
+    // Nothing listens on this port, so the tool call reports an unreachable collector.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_collector-app"))
+        .args(["--mcp", &format!("http://127.0.0.1:{port}")])
+        .env_clear()
+        .env("RUST_LOG", "debug")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start collector-app --mcp");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut next = || {
+        let mut line = String::new();
+        stdout.read_line(&mut line).expect("read a response");
+        serde_json::from_str::<serde_json::Value>(&line)
+            .unwrap_or_else(|err| panic!("stdout line is not JSON ({err}): {line:?}"))
+    };
+    for request in [
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"cli-test","version":"0"}}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"collector_health","arguments":{}}}"#,
+    ] {
+        writeln!(stdin, "{request}").unwrap();
+    }
+    stdin.flush().unwrap();
+
+    let mut responses = std::collections::BTreeMap::new();
+    while responses.len() < 3 {
+        let message = next();
+        if let Some(id) = message["id"].as_u64() {
+            responses.insert(id, message);
+        }
+    }
+    assert_eq!(
+        responses[&1]["result"]["serverInfo"]["name"],
+        "rusty-sunspec-collector"
+    );
+    assert_eq!(
+        responses[&2]["result"]["tools"].as_array().unwrap().len(),
+        4
+    );
+    assert_eq!(responses[&3]["result"]["isError"], true);
+    let message = responses[&3]["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+    assert!(
+        message.contains("could not reach the collector"),
+        "{message}"
+    );
+
+    // Closing stdin ends the session.
+    drop(stdin);
+    let status = child.wait().expect("collector-app --mcp exits");
+    assert!(status.success(), "{status}");
+}
+
+#[test]
+fn mcp_needs_a_collector_url() {
+    let output = Command::new(env!("CARGO_BIN_EXE_collector-app"))
+        .arg("--mcp")
+        .env_clear()
+        .output()
+        .expect("run collector-app");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--mcp needs the collector's URL"));
+}

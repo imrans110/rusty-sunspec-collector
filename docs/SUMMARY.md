@@ -13,6 +13,7 @@
 - [Serial devices through a converter](guides/serial-devices.md)
 - [Polling profiles](guides/polling-profiles.md)
 - [Probing a device](guides/probing-a-device.md)
+- [Connecting an AI assistant (MCP)](guides/ai-assistants.md)
 - [Verifying a release](guides/verifying-a-release.md)
 - [Monitoring and alerts](guides/monitoring.md)
 - [Buffer maintenance](buffer_maintenance.md)

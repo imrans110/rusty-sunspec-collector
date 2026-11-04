@@ -2,7 +2,7 @@ use std::env;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 
@@ -16,6 +16,7 @@ const EXIT_CONFIG: u8 = 78;
 const USAGE: &str = "\
 usage: collector-app [--config PATH]
        collector-app --probe HOST[:UNIT] [--keep-identifiers] [--config PATH]
+       collector-app --mcp URL
        collector-app --print-schema | --print-models | --version | --help
 
 --probe reads one device's SunSpec map once and prints it as JSON (for device reports and
@@ -23,6 +24,9 @@ sunspec-sim --fixture). Serial numbers and network addresses are blanked unless
 --keep-identifiers is given. The port, timeouts and base address come from the config.
 --print-models prints the metadata of every bundled SunSpec model (labels, units,
 descriptions, enum and bitfield symbols) as JSON.
+--mcp runs a read-only MCP server on stdin and stdout for an AI assistant such as Claude
+Desktop or Claude Code. Its tools read the /devices, /models and /healthz endpoints of the
+collector at URL (for example http://10.0.4.2:9090), so nothing can change a device setting.
 
 Settings come from the config file (--config or SUNSPEC_CONFIG) and SUNSPEC_* environment
 variables; see https://imrans110.github.io/rusty-sunspec-collector/configuration.html";
@@ -70,6 +74,15 @@ async fn run() -> Result<()> {
     if let Some(target) = arg_value("--probe") {
         return run_probe(&target).await;
     }
+    if env::args()
+        .skip(1)
+        .any(|arg| arg == "--mcp" || arg.starts_with("--mcp="))
+    {
+        let url = arg_value("--mcp").ok_or_else(|| {
+            anyhow!("--mcp needs the collector's URL, for example --mcp http://10.0.4.2:9090")
+        })?;
+        return run_mcp(&url).await;
+    }
     init_logging().context(ConfigError("logging setup failed"))?;
 
     // Install signal handlers first so a stop during startup is still graceful.
@@ -97,6 +110,19 @@ fn init_logging() -> Result<()> {
         Ok(other) => bail!("SUNSPEC_LOG_FORMAT must be text or json, got {other:?}"),
     }
     Ok(())
+}
+
+/// MCP mode. stdout carries the protocol, so logs go to stderr (default `warn`). The
+/// server exits when the assistant closes stdin.
+async fn run_mcp(url: &str) -> Result<()> {
+    let url = collector_app::mcp::CollectorUrl::parse(url).context("--mcp")?;
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .init();
+    collector_app::mcp::serve_stdio(url).await
 }
 
 /// Resolves on SIGINT (Ctrl-C) or SIGTERM, which systemd and Docker send on stop.
